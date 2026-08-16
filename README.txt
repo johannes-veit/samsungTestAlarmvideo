@@ -1,9 +1,9 @@
-Samsung Alarmvideo Test v0.2.0
+Samsung Alarmvideo Test v0.2.1
 
 Direktes Update von v0.1.6. Keine neue Benutzerinstanz anlegen.
 Library-GUID {6DC070DF-7EBE-42F5-B86A-94C14ED15E2D}, Hauptmodul-GUID {08AF3A16-C63E-4405-B203-29262047C871} und Prefix SAVT bleiben unverändert.
 
-Architektur v0.2.0:
+Architektur v0.2.1:
 - Hauptinstanz bleibt technisch ohne Parent, damit die vorhandene Instanz beim Update nicht umgehängt wird.
 - WakeUp weiterhin ausschließlich über SamsungTizen_WakeUp.
 - Die Hauptinstanz erzeugt automatisch zwei verborgene technische IP-Symcon-Instanzen:

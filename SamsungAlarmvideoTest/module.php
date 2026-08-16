@@ -89,7 +89,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         http_response_code(410);
         header('Content-Type: text/plain; charset=utf-8');
-        echo 'Samsung Alarmvideo Test v0.2.0 uses the internal DLNA media server.';
+        echo 'Samsung Alarmvideo Test v0.2.1 uses the internal DLNA media server.';
     }
 
     public function WakeTV(): string
@@ -501,7 +501,19 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
 
         try {
+            // Vor dem Erzeugen sicherstellen, dass Symcon das Modul wirklich geladen hat.
+            // So wird bei einer fehlerhaften Bibliotheksstruktur niemals mit Objekt-ID 0 weitergearbeitet.
+            if (!in_array($moduleGUID, IPS_GetModuleList(), true)) {
+                $this->SendDebug('MediaServer', 'Modul nicht geladen: ' . $moduleGUID . ' (' . $name . ')', 0);
+                return 0;
+            }
+
             $id = IPS_CreateInstance($moduleGUID);
+            if ($id <= 0 || !IPS_InstanceExists($id)) {
+                $this->SendDebug('MediaServer', 'Instanz konnte nicht erzeugt werden: ' . $name, 0);
+                return 0;
+            }
+
             IPS_SetName($id, $name);
             IPS_SetInfo($id, $ownerInfo);
             IPS_SetParent($id, $this->InstanceID);
@@ -680,7 +692,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     private function GetSharedMediaPath(string $mode): string
     {
         $root = dirname(__DIR__);
-        return $root . DIRECTORY_SEPARATOR . 'media' . DIRECTORY_SEPARATOR . ($mode === 'mp4' ? 'ALARM.mp4' : 'ALARM_DLNA.mpeg');
+        return $root . DIRECTORY_SEPARATOR . 'libs' . DIRECTORY_SEPARATOR . 'media' . DIRECTORY_SEPARATOR . ($mode === 'mp4' ? 'ALARM.mp4' : 'ALARM_DLNA.mpeg');
     }
 
     private function ValidateConfiguration(): string
