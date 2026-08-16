@@ -692,7 +692,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     private function GetSharedMediaPath(string $mode): string
     {
         $root = dirname(__DIR__);
-        return $root . DIRECTORY_SEPARATOR . 'libs' . DIRECTORY_SEPARATOR . 'media' . DIRECTORY_SEPARATOR . ($mode === 'mp4' ? 'ALARM.mp4' : 'ALARM_DLNA.mpeg');
+        return $root . DIRECTORY_SEPARATOR . 'SamsungAlarmvideoMediaServer' . DIRECTORY_SEPARATOR . ($mode === 'mp4' ? 'ALARM.mp4' : 'ALARM_DLNA.mpeg');
     }
 
     private function ValidateConfiguration(): string

@@ -22,3 +22,6 @@ Test:
 3. "DLNA-Medienserver prüfen/einrichten" drücken.
 4. TV eingeschaltet lassen.
 5. "2. Nur Alarmvideo starten (TV EIN)" drücken.
+
+
+v0.2.2: Bibliotheksstruktur korrigiert. Keine libs/media-Unterstruktur mehr; die Mediendateien liegen direkt im internen MediaServer-Modulordner, damit IP-Symcon keinen Ordner 'media' als Modul interpretiert.
