@@ -10,6 +10,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     private const TS_FILENAME = 'ALARM_DLNA.ts';
     private const HOOK_MP4 = 'samsung-alarmvideo-dlna.mp4';
     private const HOOK_MPEG = 'samsung-alarmvideo-dlna.mpeg';
+    private const HOOK_PLAYER = 'samsung-alarmvideo-player.html';
+    private const WEBSOCKET_CLIENT_GUID = '{D68FD31F-0E90-7019-F16C-1949BD3079EF}';
 
     public function Create(): void
     {
@@ -24,6 +26,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         $this->RegisterHook(self::HOOK_MP4);
         $this->RegisterHook(self::HOOK_MPEG);
+        $this->RegisterHook(self::HOOK_PLAYER);
 
         $this->RegisterVariableString('Status', 'Status', '', 10);
         // Bestehende Variablen aus 0.1.2 bewusst erhalten, damit das Update
@@ -33,6 +36,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         $this->RegisterAttributeInteger('WakeAttempts', 0);
         $this->RegisterAttributeInteger('VideoAttempts', 0);
+        $this->RegisterAttributeInteger('RequestCountBeforeBrowser', 0);
 
         $this->RegisterTimer('WakeRetry', 0, 'SAVT_TimerWakeRetry($_IPS[\'TARGET\']);');
         $this->RegisterTimer('VideoStart', 0, 'SAVT_TimerStart($_IPS[\'TARGET\']);');
@@ -47,6 +51,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->SetTimerInterval('VideoRetry', 0);
         $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
+        $this->WriteAttributeInteger('RequestCountBeforeBrowser', 0);
 
         $validation = $this->ValidateConfiguration();
         if ($validation !== '') {
@@ -55,14 +60,63 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
 
         $prepared = $this->PrepareStaticVideo();
-        $this->SetValue('Status', $prepared['ok'] ? 'Bereit – DLNA-Datei-URLs .mp4/.mpeg aktiv' : $prepared['message']);
+        $this->SetValue('Status', $prepared['ok'] ? 'Bereit – Browser-Wiedergabe über Samsung WebSocket' : $prepared['message']);
     }
 
     protected function ProcessHookData(): void
     {
         $requestUri = strtolower((string) ($_SERVER['REQUEST_URI'] ?? ''));
-        $format = str_contains($requestUri, self::HOOK_MPEG) ? 'ts' : 'mp4';
 
+        if (str_contains($requestUri, self::HOOK_PLAYER)) {
+            $this->ServePlayerPage();
+            return;
+        }
+
+        $format = str_contains($requestUri, self::HOOK_MPEG) ? 'ts' : 'mp4';
+        $this->ServeVideoFile($format);
+    }
+
+    private function ServePlayerPage(): void
+    {
+        $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unbekannt');
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        $this->RegisterHttpRequest($remote, $method, 'PLAYER', '');
+
+        $tvIP = trim($this->ReadPropertyString('TVIP'));
+        if ($remote === $tvIP) {
+            $this->SetValue('Status', 'Samsung-Browser hat den Alarm-Player geladen');
+        }
+
+        if (!in_array($method, ['GET', 'HEAD'], true)) {
+            http_response_code(405);
+            header('Allow: GET, HEAD');
+            return;
+        }
+
+        $mp4 = '/hook/' . self::HOOK_MP4;
+        $html = '<!doctype html><html><head><meta charset="utf-8">' .
+            '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' .
+            '<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}' .
+            'video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}</style></head>' .
+            '<body><video id="v" autoplay loop playsinline preload="auto" src="' . $mp4 . '"></video>' .
+            '<script>(function(){var v=document.getElementById("v");v.muted=false;v.volume=1;' .
+            'function p(){try{var r=v.play();if(r&&r.catch){r.catch(function(){})}}catch(e){}}' .
+            'v.addEventListener("loadeddata",p);v.addEventListener("canplay",p);' .
+            'v.addEventListener("ended",function(){v.currentTime=0;p()});' .
+            'setTimeout(p,100);setInterval(function(){if(v.paused)p()},750);})();</script></body></html>';
+
+        http_response_code(200);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Content-Length: ' . strlen($html));
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+        if ($method !== 'HEAD') {
+            echo $html;
+        }
+    }
+
+    private function ServeVideoFile(string $format): void
+    {
         $path = $this->GetVideoPath($format);
         if (!is_file($path)) {
             http_response_code(404);
@@ -80,24 +134,11 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         $rangeHeader = trim((string) ($_SERVER['HTTP_RANGE'] ?? ''));
         $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unbekannt');
-        $userAgent = (string) ($_SERVER['HTTP_USER_AGENT'] ?? '');
+        $this->RegisterHttpRequest($remote, $method, strtoupper($format), $rangeHeader);
 
-        try {
-            $countID = $this->GetIDForIdent('RequestCount');
-            $current = $countID > 0 ? (int) GetValue($countID) : 0;
-            $this->SetValue('RequestCount', $current + 1);
-            $requestText = sprintf(
-                '%s | %s | %s | %s%s',
-                date('d.m.Y H:i:s'),
-                $remote,
-                $method,
-                strtoupper($format),
-                $rangeHeader !== '' ? ' | ' . $rangeHeader : ''
-            );
-            $this->SetValue('LastRequest', $requestText);
-            $this->SendDebug('VideoHTTP', $requestText . ($userAgent !== '' ? ' | UA=' . $userAgent : ''), 0);
-        } catch (Throwable $e) {
-            $this->SendDebug('VideoHTTP', 'Logging fehlgeschlagen: ' . $e->getMessage(), 0);
+        $tvIP = trim($this->ReadPropertyString('TVIP'));
+        if ($remote === $tvIP) {
+            $this->SetValue('Status', 'Samsung lädt das Alarmvideo');
         }
 
         clearstatcache(true, $path);
@@ -121,7 +162,6 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
             $from = $m[1];
             $to = $m[2];
-
             if ($from === '' && $to === '') {
                 http_response_code(416);
                 header('Content-Range: bytes */' . $size);
@@ -148,23 +188,17 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
                 header('Content-Range: bytes */' . $size);
                 return;
             }
-
             $partial = true;
         }
 
         $length = $end - $start + 1;
         $mime = $format === 'ts' ? 'video/mpeg' : 'video/mp4';
-        $features = $format === 'ts'
-            ? 'DLNA.ORG_PN=AVC_TS_MP_HD_AAC_MULT5_ISO;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
-            : 'DLNA.ORG_PN=AVC_MP4_HP_HD_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
 
         http_response_code($partial ? 206 : 200);
         header('Content-Type: ' . $mime);
         header('Content-Length: ' . $length);
         header('Accept-Ranges: bytes');
-        header('Cache-Control: no-cache');
-        header('transferMode.dlna.org: Streaming');
-        header('contentFeatures.dlna.org: ' . $features);
+        header('Cache-Control: no-store, no-cache, must-revalidate');
         header('Connection: close');
         if ($partial) {
             header(sprintf('Content-Range: bytes %d-%d/%d', $start, $end, $size));
@@ -176,9 +210,9 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         $handle = @fopen($path, 'rb');
         if ($handle === false) {
+            http_response_code(500);
             return;
         }
-
         if ($start > 0) {
             @fseek($handle, $start, SEEK_SET);
         }
@@ -194,6 +228,27 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             $remaining -= strlen($chunk);
         }
         fclose($handle);
+    }
+
+    private function RegisterHttpRequest(string $remote, string $method, string $kind, string $rangeHeader): void
+    {
+        try {
+            $countID = $this->GetIDForIdent('RequestCount');
+            $current = $countID > 0 ? (int) GetValue($countID) : 0;
+            $this->SetValue('RequestCount', $current + 1);
+            $requestText = sprintf(
+                '%s | %s | %s | %s%s',
+                date('d.m.Y H:i:s'),
+                $remote,
+                $method,
+                $kind,
+                $rangeHeader !== '' ? ' | ' . $rangeHeader : ''
+            );
+            $this->SetValue('LastRequest', $requestText);
+            $this->SendDebug('HTTP', $requestText, 0);
+        } catch (Throwable $e) {
+            $this->SendDebug('HTTP', 'Logging fehlgeschlagen: ' . $e->getMessage(), 0);
+        }
     }
 
     public function WakeTV(): string
@@ -275,14 +330,44 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     public function TimerVideoRetry(): void
     {
         $this->SetTimerInterval('VideoRetry', 0);
-        $this->StartVideoNow();
+
+        $countID = $this->GetIDForIdent('RequestCount');
+        $current = $countID > 0 ? (int) GetValue($countID) : 0;
+        $before = $this->ReadAttributeInteger('RequestCountBeforeBrowser');
+        if ($current > $before) {
+            return;
+        }
+
+        $attempt = $this->ReadAttributeInteger('VideoAttempts');
+        if ($attempt >= 3) {
+            $this->SetValue('Status', 'Browserstart versucht, aber Samsung hat den Player nicht abgerufen');
+            return;
+        }
+
+        // Zweiter Versuch mit der 2020er Internet-App-ID, dritter wieder mit dem generischen Browser-ID.
+        $nextAttempt = $attempt + 1;
+        $appID = $nextAttempt === 2 ? '3202010022079' : 'org.tizen.browser';
+        $launch = $this->LaunchBrowserPlayer($appID);
+        $this->WriteAttributeInteger('VideoAttempts', $nextAttempt);
+
+        if (!$launch['ok']) {
+            if ($nextAttempt < 3) {
+                $this->SetTimerInterval('VideoRetry', 2500);
+                $this->SetValue('Status', 'WebSocket noch nicht bereit – Browser-Retry folgt automatisch');
+                return;
+            }
+            $this->SetValue('Status', 'Browserstart fehlgeschlagen: ' . $launch['message']);
+            return;
+        }
+
+        $this->SetTimerInterval('VideoRetry', 2500);
+        $this->SetValue('Status', 'Browser-Retry gesendet – warte auf Playerabruf');
     }
 
     public function StartVideoNow(): string
     {
         $this->SetTimerInterval('VideoStart', 0);
         $this->SetTimerInterval('VideoRetry', 0);
-        $this->WriteAttributeInteger('VideoAttempts', 0);
 
         $validation = $this->ValidateConfiguration();
         if ($validation !== '') {
@@ -290,60 +375,20 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             return $validation;
         }
 
-        $prepared = $this->PrepareStaticVideo();
-        if (!$prepared['ok']) {
-            $this->SetValue('Status', $prepared['message']);
-            return $prepared['message'];
-        }
-
         $countID = $this->GetIDForIdent('RequestCount');
-        $requestCountBefore = $countID > 0 ? (int) GetValue($countID) : 0;
-        $errors = [];
+        $count = $countID > 0 ? (int) GetValue($countID) : 0;
+        $this->WriteAttributeInteger('RequestCountBeforeBrowser', $count);
+        $this->WriteAttributeInteger('VideoAttempts', 1);
 
-        // Erst MP4 direkt, danach MPEG-TS als DLNA-Fallback.
-        foreach (['mp4', 'ts'] as $format) {
-            $url = $this->GetVideoURLFor($format);
-            $path = $this->GetVideoPath($format);
-            $size = @filesize($path);
-            $metadata = $this->BuildMetadata($url, $size === false ? 0 : (int) $size, $format);
-
-            $set = $this->SendAVTransport(
-                'SetAVTransportURI',
-                '<InstanceID>0</InstanceID>' .
-                '<CurrentURI>' . $this->XmlEscape($url) . '</CurrentURI>' .
-                '<CurrentURIMetaData>' . $this->XmlEscape($metadata) . '</CurrentURIMetaData>'
-            );
-
-            if (!$set['ok']) {
-                $errors[] = strtoupper($format) . ': ' . $set['message'];
-                $this->SendDebug('SetAVTransportURI ' . strtoupper($format), $set['message'] . ' | ' . $set['body'], 0);
-                continue;
-            }
-
-            $play = $this->SendAVTransport('Play', '<InstanceID>0</InstanceID><Speed>1</Speed>');
-            if (!$play['ok']) {
-                $errors[] = strtoupper($format) . ' Play: ' . $play['message'];
-                $this->SendDebug('Play ' . strtoupper($format), $play['message'] . ' | ' . $play['body'], 0);
-                continue;
-            }
-
-            // Loop ist optional; der erfolgreiche Videostart hat Vorrang.
-            $loop = $this->SendAVTransport('SetPlayMode', '<InstanceID>0</InstanceID><NewPlayMode>REPEAT_ONE</NewPlayMode>');
-            if (!$loop['ok']) {
-                $this->SendDebug('SetPlayMode', $loop['message'] . ' | ' . $loop['body'], 0);
-            }
-
-            $message = 'Alarmvideo gestartet (' . strtoupper($format) . ')' . ($loop['ok'] ? ' – Loop angefordert' : '');
+        $launch = $this->LaunchBrowserPlayer('org.tizen.browser');
+        $this->SetTimerInterval('VideoRetry', 2500);
+        if (!$launch['ok']) {
+            $message = 'WebSocket noch nicht bereit – Browser-Retry folgt automatisch';
             $this->SetValue('Status', $message);
             return $message;
         }
 
-        $requestCountAfter = $countID > 0 ? (int) GetValue($countID) : $requestCountBefore;
-        $httpHint = $requestCountAfter > $requestCountBefore
-            ? ' | Samsung hat den DLNA-Videoendpunkt abgerufen'
-            : ' | noch kein Videoabruf am DLNA-Endpunkt registriert';
-
-        $message = 'Videostart fehlgeschlagen: ' . implode(' | ', $errors) . $httpHint;
+        $message = 'Samsung-Browserstart gesendet – Alarmvideo wird automatisch gestartet';
         $this->SetValue('Status', $message);
         return $message;
     }
@@ -355,15 +400,20 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->SetTimerInterval('VideoRetry', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
 
-        $stop = $this->SendAVTransport('Stop', '<InstanceID>0</InstanceID>');
-        if (!$stop['ok']) {
-            $message = 'Stop: ' . $stop['message'];
-            $this->SetValue('Status', $message);
-            return $message;
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        try {
+            if (function_exists('SamsungTizen_SendKeys')) {
+                SamsungTizen_SendKeys($instanceID, 'KEY_RETURN');
+                $this->SetValue('Status', 'Browser/Video beenden gesendet');
+                return 'Browser/Video beenden gesendet';
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('Stop', $e->getMessage(), 0);
         }
 
-        $this->SetValue('Status', 'Video gestoppt');
-        return 'Video gestoppt';
+        $message = 'Browser konnte nicht beendet werden – SamsungTizen_SendKeys nicht verfügbar';
+        $this->SetValue('Status', $message);
+        return $message;
     }
 
     public function PrepareVideo(): string
@@ -378,21 +428,23 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         return $this->GetVideoURLFor('mp4');
     }
 
+    public function GetPlayerURL(): string
+    {
+        $host = trim($this->ReadPropertyString('SymconIP'));
+        $port = $this->ReadPropertyInteger('WebPort');
+        return sprintf('http://%s:%d/hook/%s', $host, $port, self::HOOK_PLAYER);
+    }
+
     private function PrepareStaticVideo(bool $force = false): array
     {
         $mp4 = __DIR__ . DIRECTORY_SEPARATOR . self::MP4_FILENAME;
-        $ts = __DIR__ . DIRECTORY_SEPARATOR . self::TS_FILENAME;
-
         if (!is_file($mp4)) {
             return ['ok' => false, 'message' => 'ALARM.mp4 fehlt im Modul'];
-        }
-        if (!is_file($ts)) {
-            return ['ok' => false, 'message' => 'ALARM_DLNA.ts fehlt im Modul'];
         }
 
         return [
             'ok' => true,
-            'message' => 'DLNA-Videoquelle bereit – .mp4 + .mpeg URLs aktiv'
+            'message' => 'Alarmvideo bereit – Browser-Player und MP4-Endpunkt aktiv'
         ];
     }
 
@@ -493,6 +545,67 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             $this->SendDebug('TV', $message, 0);
             return ['ok' => false, 'message' => $message];
         }
+    }
+
+    private function LaunchBrowserPlayer(string $appID): array
+    {
+        $wsID = $this->FindSamsungWebSocketClient();
+        if ($wsID <= 0) {
+            return ['ok' => false, 'message' => 'WebSocket-Client der SamsungTizen-Instanz nicht gefunden'];
+        }
+        if (!function_exists('WSC_SendMessage')) {
+            return ['ok' => false, 'message' => 'WSC_SendMessage ist nicht verfügbar'];
+        }
+
+        $payload = json_encode([
+            'method' => 'ms.channel.emit',
+            'params' => [
+                'event' => 'ed.apps.launch',
+                'to' => 'host',
+                'data' => [
+                    'action_type' => 'NATIVE_LAUNCH',
+                    'appId' => $appID,
+                    'metaTag' => $this->GetPlayerURL()
+                ]
+            ]
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if ($payload === false) {
+            return ['ok' => false, 'message' => 'Browser-Befehl konnte nicht erzeugt werden'];
+        }
+
+        try {
+            $ok = WSC_SendMessage($wsID, $payload);
+            $this->SendDebug('BrowserLaunch', 'WS #' . $wsID . ' app=' . $appID . ' url=' . $this->GetPlayerURL() . ' result=' . ($ok ? 'true' : 'false'), 0);
+            return $ok
+                ? ['ok' => true, 'message' => 'Browser-Befehl gesendet']
+                : ['ok' => false, 'message' => 'WebSocket hat Browser-Befehl nicht angenommen'];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'message' => 'Browser-Befehl fehlgeschlagen: ' . $e->getMessage()];
+        }
+    }
+
+    private function FindSamsungWebSocketClient(): int
+    {
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
+            return 0;
+        }
+
+        $wsInstances = IPS_GetInstanceListByModuleID(self::WEBSOCKET_CLIENT_GUID);
+        $current = $instanceID;
+        for ($i = 0; $i < 5; $i++) {
+            $instance = IPS_GetInstance($current);
+            $parentID = (int) ($instance['ConnectionID'] ?? 0);
+            if ($parentID <= 0 || !IPS_InstanceExists($parentID)) {
+                return 0;
+            }
+            if (in_array($parentID, $wsInstances, true)) {
+                return $parentID;
+            }
+            $current = $parentID;
+        }
+        return 0;
     }
 
     private function BuildMetadata(string $url, int $size, string $format): string

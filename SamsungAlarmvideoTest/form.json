@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "v0.1.5: Der Samsung bekommt jetzt echte Medien-URLs mit Dateiendung (.mp4 / .mpeg) statt einer ?format=-URL. MP4 und MPEG-Fallback wurden passend zu den beim funktionierenden Windows-DLNA-Test gesehenen Profilen vorbereitet. WakeUp bleibt unverändert."
+      "caption": "v0.1.6: DLNA/AVTransport wird nicht mehr verwendet. Das Modul startet den Samsung-Internetbrowser direkt über den bereits vorhandenen SamsungTizen-WebSocket und öffnet dort einen Vollbild-Alarmplayer. WakeUp bleibt unverändert."
     },
     {
       "type": "SelectInstance",
@@ -44,13 +44,13 @@
     },
     {
       "type": "Label",
-      "caption": "Der Modulstatus und 'Letzter Videoabruf' zeigen, ob Samsung die neue .mp4/.mpeg-URL tatsächlich abruft."
+      "caption": "Der Browser-Player startet ALARM.mp4 automatisch mit Ton und Loop. Falls der erste Browserstart nicht greift, erfolgt genau ein automatischer Retry mit der 2020er Internet-App-ID."
     }
   ],
   "actions": [
     {
       "type": "Button",
-      "caption": "DLNA-Videoquelle prüfen",
+      "caption": "Videoquelle/Player prüfen",
       "onClick": "echo SAVT_PrepareVideo($id);"
     },
     {
@@ -70,7 +70,7 @@
     },
     {
       "type": "Button",
-      "caption": "Video stoppen",
+      "caption": "Browser / Video beenden",
       "onClick": "echo SAVT_StopVideo($id);"
     }
   ]
