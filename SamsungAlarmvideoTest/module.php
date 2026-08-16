@@ -90,7 +90,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         http_response_code(410);
         header('Content-Type: text/plain; charset=utf-8');
-        echo 'Samsung Alarmvideo Test v0.2.3 uses the internal DLNA media server.';
+        echo 'Samsung Alarmvideo Test v0.2.5 uses the internal DLNA media server.';
     }
 
     public function WakeTV(): string

@@ -24,7 +24,7 @@ class SamsungAlarmvideoMediaServer extends IPSModule
         $this->WriteAttributeString('ClientBuffers', '{}');
     }
 
-    public function ReceiveData(string $JSONString): string
+    public function ReceiveData($JSONString)
     {
         $data = json_decode($JSONString, true);
         if (!is_array($data)) {

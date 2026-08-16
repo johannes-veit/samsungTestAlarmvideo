@@ -34,3 +34,6 @@ v0.2.4 Update-Sicherheit:
 
 
 v0.2.4: Korrektur der programmgesteuerten MediaServer-Erzeugung fuer IP-Symcon 9. Der Server Socket wird jetzt zwingend zuerst erstellt/aktiviert; der technische MediaServer-Handler verwendet bewusst IPSModule statt IPSModuleStrict und wird danach explizit verbunden. Modulpruefung erfolgt ueber IPS_ModuleExists().
+
+
+v0.2.5: Korrigiert die ReceiveData-Signatur des internen MediaServer-Moduls, damit sie mit IPSModule kompatibel ist und das Hilfsmodul von IP-Symcon geladen wird.
