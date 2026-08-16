@@ -89,7 +89,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         http_response_code(410);
         header('Content-Type: text/plain; charset=utf-8');
-        echo 'Samsung Alarmvideo Test v0.2.1 uses the internal DLNA media server.';
+        echo 'Samsung Alarmvideo Test v0.2.3 uses the internal DLNA media server.';
     }
 
     public function WakeTV(): string
@@ -516,7 +516,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
             IPS_SetName($id, $name);
             IPS_SetInfo($id, $ownerInfo);
-            IPS_SetParent($id, $this->InstanceID);
+            // Technische Instanzen bewusst nicht umhaengen. Sie bleiben am Root und werden nur versteckt.
+            // Dadurch gibt es auch bei Update-/Migrationsresten keine 'Root kann nicht geaendert werden'-Warnung.
             if (function_exists('IPS_SetHidden')) {
                 IPS_SetHidden($id, true);
             }

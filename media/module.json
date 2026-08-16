@@ -1,0 +1,12 @@
+{
+  "id": "{C77D3C35-BEDB-4A2F-8C37-A073FB5A9365}",
+  "name": "Samsung Alarmvideo Legacy Media",
+  "type": 3,
+  "vendor": "",
+  "aliases": [],
+  "url": "",
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "SAVTLEGACY"
+}
