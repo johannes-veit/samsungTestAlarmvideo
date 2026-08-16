@@ -2,12 +2,18 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "Eigenständiger Test für Samsung-TV + ALARM.mp4. Die bestehende Alarmanlage wird nicht verändert."
+      "caption": "Einfacher Einzeltest. Keine PowerShell nötig. Die bestehende LCN Alarmanlage wird nicht verändert."
     },
     {
       "type": "SelectInstance",
       "name": "SamsungInstanceID",
       "caption": "SamsungTizen Instanz"
+    },
+    {
+      "type": "SelectVariable",
+      "name": "TVStatusVariableID",
+      "caption": "Samsung TV Status (Boolean)",
+      "validVariableTypes": [0]
     },
     {
       "type": "ValidationTextBox",
@@ -38,11 +44,21 @@
   "actions": [
     {
       "type": "Label",
-      "caption": "Testablauf: TV einschalten → eingestellte Verzögerung → Videoquelle setzen → Loop anfordern → Wiedergabe starten."
+      "caption": "Zum Testen sind TV-Start und Video absichtlich getrennt. So ist sofort erkennbar, welcher Teil funktioniert."
     },
     {
       "type": "Button",
-      "caption": "TV + Alarmvideo testen",
+      "caption": "1. Nur TV aufwecken",
+      "onClick": "echo SAVT_WakeTV($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "2. Nur Alarmvideo starten (TV muss EIN sein)",
+      "onClick": "echo SAVT_StartVideoNow($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "Kompletttest: TV + Alarmvideo",
       "onClick": "echo SAVT_TestVideo($id);"
     },
     {

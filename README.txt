@@ -1,35 +1,28 @@
-Samsung Alarmvideo Test 0.1.1
+Samsung Alarmvideo Test 0.1.2
 ==============================
 
 Zweck
 -----
-Eigenständiger Test für die Alarmvideo-Wiedergabe auf dem Samsung TV.
+Eigenständiger Test für Samsung-TV + Alarmvideo. Keine PowerShell nötig.
 Die bestehende LCN Alarmanlage wird NICHT verändert.
 
-Voreinstellungen für das aktuelle System
-----------------------------------------
+Voreinstellungen
+----------------
 SamsungTizen Instanz: 48488
+TV-Statusvariable:    16319
 Samsung TV:           192.168.103.54
 SymBox:                192.168.103.59
-WebServer Port:        3777
+WebServer:             3777
 Startverzögerung:      4000 ms
-Video:                 ALARM.mp4 (60 s, H.264 + AAC)
 
-Test
-----
-1. Modul installieren und eine Instanz "Samsung Alarmvideo Test" anlegen.
-2. Konfiguration prüfen und "Übernehmen".
-3. Unter "Testumgebung" auf "TV + Alarmvideo testen" klicken.
-4. Im Objektbaum die Variablen "Status", "Letzter Videoabruf" und "Videoabrufe" beobachten.
-5. Mit "Video stoppen" beenden.
-
-Technik
--------
-Das Modul stellt ALARM.mp4 selbst über einen Symcon-WebHook bereit und steuert
-den Samsung direkt über UPnP AVTransport. Windows/PowerShell ist nicht nötig.
-
-Aenderungen 0.1.1
+Änderungen 0.1.2
 -----------------
-- TV-WakeUp wie in der bewaehrten Alarmanlagen-Logik: sofort, Statuspruefung nach 5 s, maximal ein zweiter WakeUp.
-- Video startet nach einstellbarer Verzoegerung; AVTransport wird bei bereits eingeschaltetem TV begrenzt erneut versucht.
-- Keine Endlosschleifen, keine PowerShell.
+- TV-Start und Video-Test getrennt, damit Fehler sofort zuzuordnen sind.
+- Wake-on-LAN wird als echtes Magic Packet direkt aus den in der SamsungTizen-Instanz
+  gespeicherten Werten BroadcastAddress und MACAddress gesendet.
+- Die vom Nutzer gelieferte ALARM.mp4 wurde einmalig in ein Samsung/DLNA-freundliches
+  H.264-High/AAC-Profil (1280x720, 48 kHz Stereo) konvertiert.
+- Zusätzlich ist eine MPEG-TS-Fallbackdatei enthalten.
+- AVTransport versucht zuerst das passende MP4-DLNA-Profil und bei Ablehnung automatisch
+  MPEG-TS als Fallback.
+- WebHook liefert passende DLNA-Header und Byte-Range-Antworten.

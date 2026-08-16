@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 class SamsungAlarmvideoTest extends IPSModuleStrict
 {
-    private const HOOK = 'samsung-alarmvideo-test.mp4';
+    private const SAMSUNG_TIZEN_MODULE_GUID = '{65BF76B4-042C-4971-A5CC-292FA5E49C86}';
+    private const HOOK_MP4 = 'samsung-alarmvideo-test.mp4';
+    private const HOOK_TS = 'samsung-alarmvideo-test.ts';
     private const AVT_SERVICE = 'urn:schemas-upnp-org:service:AVTransport:1';
+
+    private const MP4_PROTOCOL = 'http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_HP_HD_AAC;DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000';
+    private const TS_PROTOCOL = 'http-get:*:video/mpeg:DLNA.ORG_PN=AVC_TS_HD_EU_ISO;DLNA.ORG_OP=10;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
 
     public function Create(): void
     {
         parent::Create();
 
         $this->RegisterPropertyInteger('SamsungInstanceID', 48488);
+        $this->RegisterPropertyInteger('TVStatusVariableID', 16319);
         $this->RegisterPropertyString('TVIP', '192.168.103.54');
         $this->RegisterPropertyString('SymconIP', '192.168.103.59');
         $this->RegisterPropertyInteger('WebPort', 3777);
@@ -27,7 +33,9 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->RegisterTimer('WakeRetry', 0, 'SAVT_TimerWakeRetry($_IPS[\'TARGET\']);');
         $this->RegisterTimer('VideoStart', 0, 'SAVT_TimerStart($_IPS[\'TARGET\']);');
         $this->RegisterTimer('VideoRetry', 0, 'SAVT_TimerVideoRetry($_IPS[\'TARGET\']);');
-        $this->RegisterHook(self::HOOK);
+
+        $this->RegisterHook(self::HOOK_MP4);
+        $this->RegisterHook(self::HOOK_TS);
     }
 
     public function ApplyChanges(): void
@@ -38,7 +46,25 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->SetTimerInterval('VideoRetry', 0);
         $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
-        $this->SetValue('Status', 'Bereit');
+
+        $validation = $this->ValidateConfiguration();
+        $this->SetValue('Status', $validation === '' ? 'Bereit' : 'Konfiguration: ' . $validation);
+    }
+
+    public function WakeTV(): string
+    {
+        $validation = $this->ValidateSamsungInstance();
+        if ($validation !== '') {
+            $this->SetValue('Status', $validation);
+            return $validation;
+        }
+
+        $result = $this->SendMagicPacket();
+        $this->SetValue('Status', $result['message']);
+        if ($result['ok']) {
+            $this->WriteAttributeInteger('WakeAttempts', 1);
+        }
+        return $result['message'];
     }
 
     public function TestVideo(): string
@@ -49,39 +75,31 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
 
-        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        $validation = $this->ValidateConfiguration();
+        if ($validation !== '') {
+            $this->SetValue('Status', $validation);
+            return $validation;
+        }
+
         $delay = max(0, $this->ReadPropertyInteger('StartDelayMs'));
 
-        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
-            $this->SetValue('Status', 'Fehler: SamsungTizen Instanz ungültig');
-            return 'SamsungTizen Instanz ungültig.';
-        }
-
-        $tvState = $this->TVIsOn();
-        if ($tvState === true) {
+        if ($this->TVIsOn()) {
             $this->SetValue('Status', sprintf('TV bereits EIN – Video in %.1f s', $delay / 1000));
-            if ($delay === 0) {
-                return $this->StartVideoNow();
-            }
-            $this->SetTimerInterval('VideoStart', $delay);
-            return sprintf('TV ist bereits EIN. Alarmvideo startet nach %.1f Sekunden.', $delay / 1000);
+            $this->SetTimerInterval('VideoStart', max(250, $delay));
+            return (string) $this->GetValue('Status');
         }
 
-        if (!$this->SendWakeUp(1)) {
-            return (string) GetValue($this->GetIDForIdent('Status'));
+        $wake = $this->SendMagicPacket();
+        if (!$wake['ok']) {
+            $this->SetValue('Status', $wake['message']);
+            return $wake['message'];
         }
 
-        // Bewährte Logik aus der Alarmanlage: nach 5 s genau einmal prüfen
-        // und nur bei weiterhin AUS einen zweiten WakeUp senden.
+        $this->WriteAttributeInteger('WakeAttempts', 1);
         $this->SetTimerInterval('WakeRetry', 5000);
+        $this->SetTimerInterval('VideoStart', max(250, $delay));
 
-        if ($delay === 0) {
-            $this->SetTimerInterval('VideoStart', 250);
-        } else {
-            $this->SetTimerInterval('VideoStart', $delay);
-        }
-
-        $message = sprintf('TV-Start gesendet – Video in %.1f s', $delay / 1000);
+        $message = sprintf('WOL gesendet – Video in %.1f s', $delay / 1000);
         $this->SetValue('Status', $message);
         return $message;
     }
@@ -90,23 +108,28 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         $this->SetTimerInterval('WakeRetry', 0);
 
-        $tvState = $this->TVIsOn();
-        if ($tvState === true) {
-            // Falls der erste Video-Versuch wegen noch nicht bereitem AVTransport
-            // fehlgeschlagen ist, jetzt unmittelbar erneut versuchen.
-            if ($this->ReadAttributeInteger('VideoAttempts') > 0) {
+        if ($this->TVIsOn()) {
+            // TV ist jetzt erreichbar. Falls der Video-Start wegen noch AUS gemeldetem
+            // Status vorher nicht ausgeführt wurde, unmittelbar nachholen.
+            if ($this->ReadAttributeInteger('WakeAttempts') > 0 && $this->ReadAttributeInteger('VideoAttempts') === 0) {
                 $this->SetTimerInterval('VideoRetry', 250);
             }
             return;
         }
 
-        // Maximal ein zweiter WakeUp. Kein Endlos-WOL und kein Toggle-Sturm.
-        if ($this->ReadAttributeInteger('WakeAttempts') < 2 && $this->SendWakeUp(2)) {
-            $this->SetTimerInterval('VideoRetry', 0);
-            $this->WriteAttributeInteger('VideoAttempts', 0);
+        if ($this->ReadAttributeInteger('WakeAttempts') >= 2) {
+            $this->SetValue('Status', 'TV bleibt AUS – WOL zweimal gesendet');
+            return;
+        }
+
+        $result = $this->SendMagicPacket();
+        if ($result['ok']) {
+            $this->WriteAttributeInteger('WakeAttempts', 2);
             $delay = max(250, $this->ReadPropertyInteger('StartDelayMs'));
             $this->SetTimerInterval('VideoStart', $delay);
-            $this->SetValue('Status', sprintf('TV noch AUS – 2. WakeUp gesendet, Video in %.1f s', $delay / 1000));
+            $this->SetValue('Status', sprintf('TV noch AUS – 2. WOL gesendet, Video in %.1f s', $delay / 1000));
+        } else {
+            $this->SetValue('Status', $result['message']);
         }
     }
 
@@ -126,129 +149,88 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         $this->SetTimerInterval('VideoStart', 0);
 
-        $videoPath = __DIR__ . DIRECTORY_SEPARATOR . 'ALARM.mp4';
-        if (!is_file($videoPath)) {
-            $this->SetValue('Status', 'Fehler: ALARM.mp4 fehlt im Modul');
-            return 'ALARM.mp4 fehlt im Modul.';
+        $validation = $this->ValidateConfiguration();
+        if ($validation !== '') {
+            $this->SetValue('Status', $validation);
+            return $validation;
+        }
+
+        if (!$this->TVIsOn()) {
+            if ($this->ReadAttributeInteger('WakeAttempts') > 0) {
+                $this->SetTimerInterval('VideoRetry', 1000);
+                $this->SetValue('Status', 'TV noch AUS – Video wartet auf TV-Start');
+            } else {
+                $this->SetValue('Status', 'TV-Status ist AUS – zuerst TV einschalten oder Kompletttest verwenden');
+            }
+            return (string) $this->GetValue('Status');
         }
 
         $attempt = $this->ReadAttributeInteger('VideoAttempts') + 1;
         $this->WriteAttributeInteger('VideoAttempts', $attempt);
 
-        $url = $this->GetVideoURL();
-        $this->SetValue('Status', sprintf('Video-Start Versuch %d – %s', $attempt, $url));
+        $formats = [
+            [
+                'name' => 'MP4/DLNA',
+                'url' => $this->GetVideoURL('mp4'),
+                'protocol' => self::MP4_PROTOCOL,
+                'size' => $this->GetMediaSize('mp4'),
+                'mime' => 'video/mp4'
+            ],
+            [
+                'name' => 'MPEG-TS/DLNA',
+                'url' => $this->GetVideoURL('ts'),
+                'protocol' => self::TS_PROTOCOL,
+                'size' => $this->GetMediaSize('ts'),
+                'mime' => 'video/mpeg'
+            ]
+        ];
 
-        $metadata = $this->BuildMetadata($url);
-        $result = $this->SendAVTransport('SetAVTransportURI',
-            '<InstanceID>0</InstanceID>' .
-            '<CurrentURI>' . $this->XmlEscape($url) . '</CurrentURI>' .
-            '<CurrentURIMetaData>' . $this->XmlEscape($metadata) . '</CurrentURIMetaData>'
-        );
+        $errors = [];
+        foreach ($formats as $format) {
+            $metadata = $this->BuildMetadata(
+                $format['url'],
+                $format['protocol'],
+                (int) $format['size']
+            );
 
-        if (!$result['ok']) {
-            $message = 'SetAVTransportURI fehlgeschlagen: ' . $result['message'];
-            $this->SendDebug('SetAVTransportURI', $message . ' | ' . $result['body'], 0);
+            $set = $this->SendAVTransport(
+                'SetAVTransportURI',
+                '<InstanceID>0</InstanceID>' .
+                '<CurrentURI>' . $this->XmlEscape($format['url']) . '</CurrentURI>' .
+                '<CurrentURIMetaData>' . $this->XmlEscape($metadata) . '</CurrentURIMetaData>'
+            );
 
-            // Wenn der TV laut seiner vorhandenen Statusvariable noch AUS ist,
-            // wartet die WakeRetry-Logik. Sonst AVTransport begrenzt weiter prüfen.
-            $tvState = $this->TVIsOn();
-            if ($tvState !== false && $attempt < 10) {
-                $this->SetTimerInterval('VideoRetry', 1000);
-                $this->SetValue('Status', $message . sprintf(' – neuer Versuch %d/10', $attempt + 1));
-            } elseif ($tvState === false) {
-                $this->SetValue('Status', 'TV noch AUS – warte auf Wake-Retry');
-            } else {
-                $this->SetValue('Status', $message . ' – Abbruch nach 10 Versuchen');
+            if (!$set['ok']) {
+                $errors[] = $format['name'] . ': ' . $set['message'];
+                $this->SendDebug('SetAVTransportURI ' . $format['name'], $set['message'] . ' | ' . $set['body'], 0);
+                continue;
             }
+
+            $play = $this->SendAVTransport('Play', '<InstanceID>0</InstanceID><Speed>1</Speed>');
+            if (!$play['ok']) {
+                $errors[] = $format['name'] . ' Play: ' . $play['message'];
+                $this->SendDebug('Play ' . $format['name'], $play['message'] . ' | ' . $play['body'], 0);
+                continue;
+            }
+
+            $loop = $this->SendAVTransport('SetPlayMode', '<InstanceID>0</InstanceID><NewPlayMode>REPEAT_ONE</NewPlayMode>');
+            if (!$loop['ok']) {
+                $this->SendDebug('SetPlayMode', $loop['message'] . ' | ' . $loop['body'], 0);
+            }
+
+            $this->SetTimerInterval('VideoRetry', 0);
+            $message = 'Video gestartet über ' . $format['name'] . ($loop['ok'] ? ' – Loop angefordert' : ' – Loop später separat');
+            $this->SetValue('Status', $message);
             return $message;
         }
 
-        // Loop ist optional. Ein Fehler hier darf die Wiedergabe nicht verhindern.
-        $loop = $this->SendAVTransport('SetPlayMode',
-            '<InstanceID>0</InstanceID><NewPlayMode>REPEAT_ONE</NewPlayMode>'
-        );
-        if (!$loop['ok']) {
-            $this->SendDebug('SetPlayMode', $loop['message'] . ' | ' . $loop['body'], 0);
+        $message = 'Video nicht gestartet – ' . implode(' | ', $errors);
+        if ($attempt < 8) {
+            $this->SetTimerInterval('VideoRetry', 1000);
+            $message .= sprintf(' – neuer Versuch %d/8', $attempt + 1);
         }
-
-        $play = $this->SendAVTransport('Play',
-            '<InstanceID>0</InstanceID><Speed>1</Speed>'
-        );
-
-        if (!$play['ok']) {
-            $message = 'Play fehlgeschlagen: ' . $play['message'];
-            $this->SendDebug('Play', $message . ' | ' . $play['body'], 0);
-            if ($attempt < 10) {
-                $this->SetTimerInterval('VideoRetry', 1000);
-                $this->SetValue('Status', $message . sprintf(' – neuer Versuch %d/10', $attempt + 1));
-            } else {
-                $this->SetValue('Status', $message . ' – Abbruch nach 10 Versuchen');
-            }
-            return $message;
-        }
-
-        $this->SetTimerInterval('VideoRetry', 0);
-        $loopText = $loop['ok'] ? 'Loop angefordert' : 'Loop nicht bestätigt';
-        $message = 'Wiedergabe gestartet – ' . $loopText;
         $this->SetValue('Status', $message);
         return $message;
-    }
-
-    private function SendWakeUp(int $attempt): bool
-    {
-        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
-        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
-            $this->SetValue('Status', 'Fehler: SamsungTizen Instanz ungültig');
-            return false;
-        }
-
-        if (!function_exists('SamsungTizen_WakeUp')) {
-            $this->SetValue('Status', 'Fehler: SamsungTizen_WakeUp() nicht verfügbar');
-            return false;
-        }
-
-        try {
-            SamsungTizen_WakeUp($instanceID);
-            $this->WriteAttributeInteger('WakeAttempts', $attempt);
-            $this->SendDebug('WakeUp', 'WakeUp #' . $attempt . ' an Instanz ' . $instanceID . ' gesendet', 0);
-            return true;
-        } catch (Throwable $e) {
-            $message = 'TV-Start fehlgeschlagen: ' . $e->getMessage();
-            $this->SetValue('Status', $message);
-            $this->SendDebug('WakeUp', $message, 0);
-            return false;
-        }
-    }
-
-    private function TVIsOn(): ?bool
-    {
-        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
-        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
-            return null;
-        }
-
-        try {
-            foreach (IPS_GetChildrenIDs($instanceID) as $childID) {
-                $object = IPS_GetObject($childID);
-                if ((int) ($object['ObjectType'] ?? -1) !== 2) {
-                    continue;
-                }
-                $variable = IPS_GetVariable($childID);
-                if ((int) ($variable['VariableType'] ?? -1) !== 0) {
-                    continue;
-                }
-
-                $name = strtolower(trim((string) ($object['ObjectName'] ?? '')));
-                $ident = strtolower(trim((string) ($object['ObjectIdent'] ?? '')));
-                if ($name === 'status' || $ident === 'status') {
-                    return GetValueBoolean($childID);
-                }
-            }
-        } catch (Throwable $e) {
-            $this->SendDebug('TVStatus', 'Statusvariable konnte nicht gelesen werden: ' . $e->getMessage(), 0);
-        }
-
-        return null;
     }
 
     public function StopVideo(): string
@@ -256,7 +238,6 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->SetTimerInterval('WakeRetry', 0);
         $this->SetTimerInterval('VideoStart', 0);
         $this->SetTimerInterval('VideoRetry', 0);
-        $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
 
         $stop = $this->SendAVTransport('Stop', '<InstanceID>0</InstanceID>');
@@ -267,23 +248,30 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
 
         $this->SetValue('Status', 'Video gestoppt');
-        return 'Video gestoppt.';
+        return 'Video gestoppt';
     }
 
-    public function GetVideoURL(): string
+    public function GetVideoURL(string $format = 'mp4'): string
     {
         $host = trim($this->ReadPropertyString('SymconIP'));
         $port = $this->ReadPropertyInteger('WebPort');
-        return sprintf('http://%s:%d/hook/%s', $host, $port, self::HOOK);
+        $hook = strtolower($format) === 'ts' ? self::HOOK_TS : self::HOOK_MP4;
+        return sprintf('http://%s:%d/hook/%s', $host, $port, $hook);
     }
 
     protected function ProcessHookData(): void
     {
-        $file = __DIR__ . DIRECTORY_SEPARATOR . 'ALARM.mp4';
+        $uri = strtolower((string) ($_SERVER['REQUEST_URI'] ?? ''));
+        $isTS = str_contains($uri, self::HOOK_TS);
+        $format = $isTS ? 'ts' : 'mp4';
+        $file = __DIR__ . DIRECTORY_SEPARATOR . ($isTS ? 'ALARM_DLNA.ts' : 'ALARM_DLNA.mp4');
+        $mime = $isTS ? 'video/mpeg' : 'video/mp4';
+        $protocol = $isTS ? self::TS_PROTOCOL : self::MP4_PROTOCOL;
+
         if (!is_file($file)) {
             http_response_code(404);
             header('Content-Type: text/plain; charset=utf-8');
-            echo 'ALARM.mp4 not found';
+            echo 'Alarmvideo fehlt';
             return;
         }
 
@@ -298,14 +286,12 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unbekannt');
         $rangeHeader = (string) ($_SERVER['HTTP_RANGE'] ?? '');
 
-        $countID = $this->GetIDForIdent('RequestCount');
-        $count = GetValueInteger($countID) + 1;
-        SetValueInteger($countID, $count);
-        $requestText = sprintf('%s – %s – %s%s', date('d.m.Y H:i:s'), $remote, $method, $rangeHeader !== '' ? ' – ' . $rangeHeader : '');
-        $this->SetValue('LastRequest', $requestText);
+        $count = (int) $this->GetValue('RequestCount') + 1;
+        $this->SetValue('RequestCount', $count);
+        $this->SetValue('LastRequest', sprintf('%s – %s – %s – %s%s', date('d.m.Y H:i:s'), $remote, strtoupper($format), $method, $rangeHeader !== '' ? ' – ' . $rangeHeader : ''));
 
-        if ($remote === $this->ReadPropertyString('TVIP')) {
-            $this->SetValue('Status', 'Samsung TV ruft ALARM.mp4 ab');
+        if ($remote === trim($this->ReadPropertyString('TVIP'))) {
+            $this->SetValue('Status', 'Samsung TV ruft Alarmvideo ab (' . strtoupper($format) . ')');
         }
 
         $start = 0;
@@ -330,13 +316,13 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         $length = $end - $start + 1;
         http_response_code($status);
-        header('Content-Type: video/mp4');
+        header('Content-Type: ' . $mime);
         header('Content-Length: ' . $length);
         header('Accept-Ranges: bytes');
-        header('Cache-Control: no-store');
-        header('Connection: close');
+        header('Cache-Control: no-cache');
+        header('Content-Disposition: inline');
         header('transferMode.dlna.org: Streaming');
-        header('contentFeatures.dlna.org: DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000');
+        header('contentFeatures.dlna.org: ' . substr($protocol, strrpos($protocol, ':') + 1));
 
         if ($status === 206) {
             header(sprintf('Content-Range: bytes %d-%d/%d', $start, $end, $size));
@@ -356,7 +342,6 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             if ($start > 0) {
                 fseek($handle, $start);
             }
-
             $remaining = $length;
             while ($remaining > 0 && !feof($handle)) {
                 $chunk = fread($handle, min(65536, $remaining));
@@ -374,33 +359,135 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
     }
 
-    private function BuildMetadata(string $url): string
+    private function ValidateConfiguration(): string
     {
-        $protocolInfo = 'http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
-        return '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ' .
-            'xmlns:dc="http://purl.org/dc/elements/1.1/" ' .
-            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">' .
+        $instanceError = $this->ValidateSamsungInstance();
+        if ($instanceError !== '') {
+            return $instanceError;
+        }
+
+        $statusID = $this->ReadPropertyInteger('TVStatusVariableID');
+        if ($statusID <= 0 || !IPS_VariableExists($statusID)) {
+            return 'TV-Statusvariable ungültig';
+        }
+        $variable = IPS_GetVariable($statusID);
+        if ((int) ($variable['VariableType'] ?? -1) !== VARIABLETYPE_BOOLEAN) {
+            return 'TV-Statusvariable ist nicht Boolean';
+        }
+
+        if (trim($this->ReadPropertyString('TVIP')) === '') {
+            return 'TV-IP fehlt';
+        }
+        if (trim($this->ReadPropertyString('SymconIP')) === '') {
+            return 'SymBox-IP fehlt';
+        }
+
+        return '';
+    }
+
+    private function ValidateSamsungInstance(): string
+    {
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
+            return 'SamsungTizen Instanz ungültig';
+        }
+        if (!in_array($instanceID, IPS_GetInstanceListByModuleID(self::SAMSUNG_TIZEN_MODULE_GUID), true)) {
+            return 'Ausgewählte Instanz ist keine SamsungTizen-Instanz';
+        }
+        return '';
+    }
+
+    private function TVIsOn(): bool
+    {
+        $statusID = $this->ReadPropertyInteger('TVStatusVariableID');
+        if ($statusID <= 0 || !IPS_VariableExists($statusID)) {
+            return false;
+        }
+        try {
+            return (bool) GetValue($statusID);
+        } catch (Throwable $e) {
+            $this->SendDebug('TVStatus', $e->getMessage(), 0);
+            return false;
+        }
+    }
+
+    private function SendMagicPacket(): array
+    {
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        $broadcast = trim((string) IPS_GetProperty($instanceID, 'BroadcastAddress'));
+        $mac = trim((string) IPS_GetProperty($instanceID, 'MACAddress'));
+
+        if ($broadcast === '' || $mac === '') {
+            return ['ok' => false, 'message' => 'WOL nicht möglich: BroadcastAddress oder MACAddress fehlt in SamsungTizen'];
+        }
+
+        $macHex = preg_replace('/[^0-9A-Fa-f]/', '', $mac);
+        if (!is_string($macHex) || strlen($macHex) !== 12) {
+            return ['ok' => false, 'message' => 'WOL nicht möglich: MACAddress ungültig'];
+        }
+
+        $macBytes = pack('H*', $macHex);
+        $packet = str_repeat(chr(0xFF), 6) . str_repeat($macBytes, 16);
+
+        if (!function_exists('socket_create')) {
+            if (function_exists('SamsungTizen_WakeUp')) {
+                try {
+                    SamsungTizen_WakeUp($instanceID);
+                    return ['ok' => true, 'message' => 'WOL über SamsungTizen_WakeUp() gesendet'];
+                } catch (Throwable $e) {
+                    return ['ok' => false, 'message' => 'WOL fehlgeschlagen: ' . $e->getMessage()];
+                }
+            }
+            return ['ok' => false, 'message' => 'WOL fehlgeschlagen: Socket-Funktion nicht verfügbar'];
+        }
+
+        $socket = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+        if ($socket === false) {
+            return ['ok' => false, 'message' => 'WOL fehlgeschlagen: UDP-Socket konnte nicht erstellt werden'];
+        }
+
+        try {
+            @socket_set_option($socket, SOL_SOCKET, SO_BROADCAST, 1);
+            $sent = @socket_sendto($socket, $packet, strlen($packet), 0, $broadcast, 2050);
+            if ($sent === false || $sent <= 0) {
+                return ['ok' => false, 'message' => 'WOL fehlgeschlagen: Magic Packet konnte nicht gesendet werden'];
+            }
+        } finally {
+            @socket_close($socket);
+        }
+
+        return ['ok' => true, 'message' => sprintf('WOL Magic Packet gesendet (%s → %s:2050)', $mac, $broadcast)];
+    }
+
+    private function GetMediaSize(string $format): int
+    {
+        $file = __DIR__ . DIRECTORY_SEPARATOR . (strtolower($format) === 'ts' ? 'ALARM_DLNA.ts' : 'ALARM_DLNA.mp4');
+        $size = @filesize($file);
+        return $size === false ? 0 : (int) $size;
+    }
+
+    private function BuildMetadata(string $url, string $protocolInfo, int $size): string
+    {
+        $bitrate = $size > 0 ? (int) round($size / 60.0) : 0;
+        return '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ' .
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ' .
+            'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">' .
             '<item id="0" parentID="0" restricted="1">' .
             '<dc:title>ALARM</dc:title>' .
+            '<res size="' . $size . '" duration="0:01:00.000" bitrate="' . $bitrate . '" resolution="1280x720" ' .
+            'protocolInfo="' . $this->XmlEscape($protocolInfo) . '" sampleFrequency="48000" nrAudioChannels="2">' .
+            $this->XmlEscape($url) . '</res>' .
             '<upnp:class>object.item.videoItem</upnp:class>' .
-            '<res protocolInfo="' . $protocolInfo . '">' . $this->XmlEscape($url) . '</res>' .
             '</item></DIDL-Lite>';
     }
 
     private function SendAVTransport(string $action, string $arguments): array
     {
         $tvIP = trim($this->ReadPropertyString('TVIP'));
-        if ($tvIP === '') {
-            return ['ok' => false, 'message' => 'TV-IP fehlt', 'body' => ''];
-        }
-
         $url = 'http://' . $tvIP . ':9197/upnp/control/AVTransport1';
         $soap = '<?xml version="1.0" encoding="utf-8"?>' .
-            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" ' .
-            's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' .
-            '<s:Body><u:' . $action . ' xmlns:u="' . self::AVT_SERVICE . '">' .
-            $arguments .
-            '</u:' . $action . '></s:Body></s:Envelope>';
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' .
+            '<s:Body><u:' . $action . ' xmlns:u="' . self::AVT_SERVICE . '">' . $arguments . '</u:' . $action . '></s:Body></s:Envelope>';
 
         $headers = [
             'Content-Type: text/xml; charset="utf-8"',
@@ -419,8 +506,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
                 CURLOPT_POSTFIELDS => $soap,
                 CURLOPT_HTTPHEADER => $headers,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 3,
-                CURLOPT_TIMEOUT => 5,
+                CURLOPT_CONNECTTIMEOUT => 2,
+                CURLOPT_TIMEOUT => 4,
                 CURLOPT_FAILONERROR => false
             ]);
             $response = curl_exec($ch);
@@ -437,7 +524,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
                     'method' => 'POST',
                     'header' => implode("\r\n", $headers),
                     'content' => $soap,
-                    'timeout' => 5,
+                    'timeout' => 4,
                     'ignore_errors' => true
                 ]
             ]);
