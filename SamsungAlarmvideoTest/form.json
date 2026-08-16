@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "Einfacher Einzeltest. Keine PowerShell nötig. Die bestehende LCN Alarmanlage wird nicht verändert."
+      "caption": "v0.1.3: kein WebHook mehr. Das Video wird als normale statische Datei im Symcon-user-Ordner bereitgestellt. WakeUp nutzt exakt SamsungTizen_WakeUp()."
     },
     {
       "type": "SelectInstance",
@@ -39,12 +39,17 @@
       "suffix": "ms",
       "minimum": 0,
       "maximum": 30000
+    },
+    {
+      "type": "Label",
+      "caption": "Statische Video-URL nach Übernehmen: http://192.168.103.59:3777/user/samsung-alarmvideo/ALARM.mp4"
     }
   ],
   "actions": [
     {
-      "type": "Label",
-      "caption": "Zum Testen sind TV-Start und Video absichtlich getrennt. So ist sofort erkennbar, welcher Teil funktioniert."
+      "type": "Button",
+      "caption": "Video-Datei neu bereitstellen",
+      "onClick": "echo SAVT_PrepareVideo($id);"
     },
     {
       "type": "Button",
@@ -53,7 +58,7 @@
     },
     {
       "type": "Button",
-      "caption": "2. Nur Alarmvideo starten (TV muss EIN sein)",
+      "caption": "2. Nur Alarmvideo starten (TV EIN)",
       "onClick": "echo SAVT_StartVideoNow($id);"
     },
     {
