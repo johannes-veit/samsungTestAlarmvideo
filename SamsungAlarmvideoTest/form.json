@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "v0.1.3: kein WebHook mehr. Das Video wird als normale statische Datei im Symcon-user-Ordner bereitgestellt. WakeUp nutzt exakt SamsungTizen_WakeUp()."
+      "caption": "v0.1.4: Video wird jetzt über einen eigenen DLNA-tauglichen HTTP-Endpunkt mit HEAD/GET, Byte-Range und DLNA-Headern ausgeliefert. Kein /user-Pfad mehr. WakeUp bleibt unverändert über SamsungTizen_WakeUp()."
     },
     {
       "type": "SelectInstance",
@@ -42,13 +42,13 @@
     },
     {
       "type": "Label",
-      "caption": "Statische Video-URL nach Übernehmen: http://192.168.103.59:3777/user/samsung-alarmvideo/ALARM.mp4"
+      "caption": "Der Modulstatus und die Variablen 'Letzter Videoabruf' / 'Videoabrufe' zeigen, ob der Samsung die Videoquelle tatsächlich vom Symcon-Modul anfordert."
     }
   ],
   "actions": [
     {
       "type": "Button",
-      "caption": "Video-Datei neu bereitstellen",
+      "caption": "DLNA-Videoquelle prüfen",
       "onClick": "echo SAVT_PrepareVideo($id);"
     },
     {
