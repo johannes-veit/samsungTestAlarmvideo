@@ -54,6 +54,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->RegisterAttributeString('LastMediaMode', '');
         $this->RegisterAttributeInteger('LastHelperRequestCount', 0);
         $this->RegisterAttributeString('LastMediaServerError', '');
+        $this->RegisterAttributeInteger('StatsWaitTicks', 0);
+        $this->RegisterAttributeInteger('LoopFallbackPending', 0);
 
         // Bestehende Timer-Namen erhalten.
         $this->RegisterTimer('WakeRetry', 0, 'SAVT_TimerWakeRetry($_IPS[\'TARGET\']);');
@@ -71,6 +73,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
         $this->WriteAttributeInteger('VideoActive', 0);
+        $this->WriteAttributeInteger('StatsWaitTicks', 0);
+        $this->WriteAttributeInteger('LoopFallbackPending', 0);
 
         $validation = $this->ValidateConfiguration();
         if ($validation !== '') {
@@ -90,7 +94,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         http_response_code(410);
         header('Content-Type: text/plain; charset=utf-8');
-        echo 'Samsung Alarmvideo Test v0.2.5 uses the internal DLNA media server.';
+        echo 'Samsung Alarmvideo Test v0.2.6 uses the internal DLNA media server.';
     }
 
     public function WakeTV(): string
@@ -112,6 +116,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->WriteAttributeInteger('WakeAttempts', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
         $this->WriteAttributeInteger('VideoActive', 0);
+        $this->WriteAttributeInteger('StatsWaitTicks', 0);
+        $this->WriteAttributeInteger('LoopFallbackPending', 0);
 
         $validation = $this->ValidateConfiguration();
         if ($validation !== '') {
@@ -206,7 +212,38 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     public function TimerStatsSync(): void
     {
         $this->SetTimerInterval('StatsSync', 0);
-        $this->SyncMediaStats();
+        $stats = $this->SyncMediaStats();
+
+        if ($this->ReadAttributeInteger('VideoActive') !== 1) {
+            return;
+        }
+
+        $count = (int) ($stats['count'] ?? 0);
+        $bytes = (int) ($stats['bytesSent'] ?? 0);
+        $complete = (bool) ($stats['complete'] ?? false);
+
+        if ($count > 0 && $bytes > 0) {
+            if ($complete) {
+                $this->SetValue('Status', sprintf('Samsung lädt Alarmvideo – %.1f MB vollständig ausgeliefert', $bytes / 1048576));
+                if ($this->ReadAttributeInteger('LoopFallbackPending') === 1 && $this->ReadPropertyBoolean('LoopVideo')) {
+                    $this->WriteAttributeInteger('LoopFallbackPending', 0);
+                    $this->SetTimerInterval('LoopGuard', 60250);
+                }
+                return;
+            }
+            $this->SetValue('Status', sprintf('Samsung lädt Alarmvideo – %.1f MB übertragen', $bytes / 1048576));
+        } elseif ($count > 0) {
+            $this->SetValue('Status', 'Samsung hat das Alarmvideo angefordert – Übertragung startet');
+        }
+
+        $ticks = $this->ReadAttributeInteger('StatsWaitTicks') + 1;
+        $this->WriteAttributeInteger('StatsWaitTicks', $ticks);
+        if ($ticks < 20) {
+            $this->SetTimerInterval('StatsSync', 500);
+        } elseif ($count === 0) {
+            $this->SetValue('Status', 'Startbefehl akzeptiert, aber Samsung hat den Medienserver 10 s lang nicht abgerufen');
+            $this->WriteAttributeInteger('VideoActive', 0);
+        }
     }
 
     public function StartVideoNow(): string
@@ -214,6 +251,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->StopAllTimers();
         $this->WriteAttributeInteger('VideoAttempts', 0);
         $this->WriteAttributeInteger('VideoActive', 0);
+        $this->WriteAttributeInteger('StatsWaitTicks', 0);
+        $this->WriteAttributeInteger('LoopFallbackPending', 0);
         $this->ResetMediaStats();
         return $this->StartVideoNowInternal(false);
     }
@@ -223,6 +262,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->StopAllTimers();
         $this->WriteAttributeInteger('VideoActive', 0);
         $this->WriteAttributeInteger('VideoAttempts', 0);
+        $this->WriteAttributeInteger('StatsWaitTicks', 0);
+        $this->WriteAttributeInteger('LoopFallbackPending', 0);
 
         $stop = $this->SendAVTransport('Stop', '<InstanceID>0</InstanceID>');
         $this->SetTimerInterval('StatsSync', 500);
@@ -286,7 +327,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
                 $this->WriteAttributeString('LastMediaMode', $mode);
                 $this->WriteAttributeInteger('VideoAttempts', 0);
                 $this->SetTimerInterval('VideoRetry', 0);
-                $this->SetTimerInterval('StatsSync', 1000);
+                $this->SetTimerInterval('StatsSync', 500);
 
                 $loopText = '';
                 if ($this->ReadPropertyBoolean('LoopVideo')) {
@@ -296,14 +337,19 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
                     );
                     if ($repeat['ok']) {
                         $loopText = ' – Loop REPEAT_ONE aktiv';
+                        $this->WriteAttributeInteger('LoopFallbackPending', 0);
                         $this->SetTimerInterval('LoopGuard', 0);
                     } else {
-                        $loopText = ' – Loop per 60-s-Fallback';
-                        $this->SetTimerInterval('LoopGuard', 60250);
+                        // Erst nach einem bestätigten Medienabruf den 60-s-Fallback aktivieren.
+                        // So erzeugt ein fehlerhafter Stream keine endlosen TV-Neustartversuche.
+                        $loopText = ' – Loop-Fallback wartet auf erfolgreichen Videoabruf';
+                        $this->WriteAttributeInteger('LoopFallbackPending', 1);
+                        $this->SetTimerInterval('LoopGuard', 0);
                     }
                 }
 
-                $message = 'Alarmvideo gestartet (' . strtoupper($mode) . ')' . $loopText;
+                $this->WriteAttributeInteger('StatsWaitTicks', 0);
+                $message = 'Startbefehl akzeptiert (' . strtoupper($mode) . ')' . $loopText . ' – warte auf Samsung-Videoabruf';
                 $this->SetValue('Status', $message);
                 return $message;
             }
@@ -591,30 +637,28 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->WriteAttributeInteger('LastHelperRequestCount', 0);
     }
 
-    private function SyncMediaStats(): void
+    private function SyncMediaStats(): array
     {
         $helperID = $this->ReadAttributeInteger('MediaHelperID');
         if ($helperID <= 0 || !IPS_InstanceExists($helperID) || !function_exists('SAVTMS_GetStats')) {
-            return;
+            return [];
         }
 
         try {
             $json = SAVTMS_GetStats($helperID);
             $stats = json_decode($json, true);
             if (!is_array($stats)) {
-                return;
+                return [];
             }
             $count = (int) ($stats['count'] ?? 0);
             $last = (string) ($stats['last'] ?? '');
             $this->SetValue('RequestCount', $count);
             $this->SetValue('LastRequest', $last);
             $this->WriteAttributeInteger('LastHelperRequestCount', $count);
-
-            if ($count > 0 && $this->ReadAttributeInteger('VideoActive') === 1) {
-                $this->SetValue('Status', 'Alarmvideo läuft – Samsung lädt vom DLNA-Medienserver');
-            }
+            return $stats;
         } catch (Throwable $e) {
             $this->SendDebug('MediaStats', $e->getMessage(), 0);
+            return [];
         }
     }
 
@@ -665,6 +709,35 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
 
         if ($status === 200 && str_contains($body, 'Samsung Alarmvideo DLNA MediaServer')) {
+            // Zusätzlich 64 KiB des echten MPEG-Streams lesen. Damit prüft der
+            // Selbsttest nicht nur den Port, sondern auch den Binärtransfer.
+            if (function_exists('curl_init')) {
+                $mediaURL = $this->GetMediaURL('mpeg');
+                $mh = curl_init($mediaURL);
+                curl_setopt_array($mh, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_CONNECTTIMEOUT => 1,
+                    CURLOPT_TIMEOUT => 4,
+                    CURLOPT_FAILONERROR => false,
+                    CURLOPT_RANGE => '0-65535'
+                ]);
+                $mediaBody = curl_exec($mh);
+                $mediaStatus = (int) curl_getinfo($mh, CURLINFO_HTTP_CODE);
+                $mediaError = $mediaBody === false ? curl_error($mh) : '';
+                curl_close($mh);
+
+                if ($mediaBody === false) {
+                    return ['ok' => false, 'message' => 'Medientest fehlgeschlagen: ' . $mediaError];
+                }
+                $mediaBody = (string) $mediaBody;
+                if (!in_array($mediaStatus, [200, 206], true) || strlen($mediaBody) !== 65536) {
+                    return ['ok' => false, 'message' => 'Medientest unerwartet: HTTP ' . $mediaStatus . ', ' . strlen($mediaBody) . ' Bytes'];
+                }
+                if ($mediaBody === '' || ord($mediaBody[0]) !== 0x47) {
+                    return ['ok' => false, 'message' => 'Medientest: MPEG-TS Binärdaten verändert'];
+                }
+                return ['ok' => true, 'message' => 'OK (64 KiB Medienstream)'];
+            }
             return ['ok' => true, 'message' => 'OK'];
         }
         if ($error !== '') {

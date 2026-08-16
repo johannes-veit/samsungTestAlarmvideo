@@ -1,3 +1,17 @@
+Samsung Alarmvideo Test v0.2.6
+
+Direktes Update der bestehenden v0.1.6/v0.2.x Instanz. Keine neue Benutzerinstanz anlegen.
+
+Änderungen v0.2.6:
+- Medienserver sendet Binärdaten bevorzugt direkt per SSCK_SendPacket an den anfragenden Client.
+- Kein hartes Trennen der TCP-Verbindung unmittelbar nach dem Videostream.
+- Kleinere 16-KiB-Datenpakete mit kurzem Yield zur stabilen Übertragung großer Dateien.
+- Transferstatus (Bytes/komplett) wird intern protokolliert.
+- 60-s-Loop-Fallback startet erst nach bestätigtem Videoabruf; keine wiederholten TV-Fehlversuche bei defektem Stream.
+- Status unterscheidet nun zwischen akzeptiertem Startbefehl und tatsächlichem Videoabruf.
+
+Bestehende GUIDs, Modulname und Prefix bleiben erhalten.
+
 Samsung Alarmvideo Test v0.2.1
 
 Direktes Update von v0.1.6. Keine neue Benutzerinstanz anlegen.

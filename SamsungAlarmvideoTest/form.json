@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "v0.2.0: direktes Update von v0.1.6. WakeUp bleibt unverändert. Das Video wird jetzt über einen eigenen kleinen DLNA/HTTP-Medienserver auf der SymBox ausgeliefert. Die technische Hilfsinstanz und der Server Socket werden automatisch erstellt und verborgen."
+      "caption": "v0.2.6: direktes Update der bestehenden Instanz. WakeUp bleibt unverändert. Das Video wird jetzt über einen eigenen kleinen DLNA/HTTP-Medienserver auf der SymBox ausgeliefert. Die technische Hilfsinstanz und der Server Socket werden automatisch erstellt und verborgen."
     },
     {
       "type": "SelectInstance",

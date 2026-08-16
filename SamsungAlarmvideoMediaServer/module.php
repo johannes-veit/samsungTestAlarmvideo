@@ -16,6 +16,9 @@ class SamsungAlarmvideoMediaServer extends IPSModule
         $this->RegisterAttributeString('ClientBuffers', '{}');
         $this->RegisterAttributeInteger('RequestCount', 0);
         $this->RegisterAttributeString('LastRequest', '');
+        $this->RegisterAttributeInteger('BytesSent', 0);
+        $this->RegisterAttributeInteger('TransferComplete', 0);
+        $this->RegisterAttributeString('LastTransfer', '');
     }
 
     public function ApplyChanges(): void
@@ -78,13 +81,19 @@ class SamsungAlarmvideoMediaServer extends IPSModule
     {
         $this->WriteAttributeInteger('RequestCount', 0);
         $this->WriteAttributeString('LastRequest', '');
+        $this->WriteAttributeInteger('BytesSent', 0);
+        $this->WriteAttributeInteger('TransferComplete', 0);
+        $this->WriteAttributeString('LastTransfer', '');
     }
 
     public function GetStats(): string
     {
         return json_encode([
             'count' => $this->ReadAttributeInteger('RequestCount'),
-            'last' => $this->ReadAttributeString('LastRequest')
+            'last' => $this->ReadAttributeString('LastRequest'),
+            'bytesSent' => $this->ReadAttributeInteger('BytesSent'),
+            'complete' => $this->ReadAttributeInteger('TransferComplete') === 1,
+            'transfer' => $this->ReadAttributeString('LastTransfer')
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
     }
 
@@ -213,7 +222,8 @@ class SamsungAlarmvideoMediaServer extends IPSModule
             'Accept-Ranges: bytes',
             'transferMode.dlna.org: Streaming',
             'contentFeatures.dlna.org: ' . $features,
-            'Connection: close'
+            'Connection: keep-alive',
+            'Keep-Alive: timeout=10, max=100'
         ];
         if ($partial) {
             $responseHeaders[] = sprintf('Content-Range: bytes %d-%d/%d', $start, $end, $size);
@@ -235,13 +245,13 @@ class SamsungAlarmvideoMediaServer extends IPSModule
             return;
         }
         if ($method === 'HEAD') {
-            $this->CloseSocketClient($clientIP, $clientPort);
             return;
         }
 
         $handle = @fopen($path, 'rb');
         if ($handle === false) {
-            $this->CloseSocketClient($clientIP, $clientPort);
+            $this->WriteAttributeInteger('TransferComplete', 0);
+            $this->WriteAttributeString('LastTransfer', 'Datei konnte nicht geöffnet werden');
             return;
         }
         if ($start > 0) {
@@ -249,21 +259,46 @@ class SamsungAlarmvideoMediaServer extends IPSModule
         }
 
         $remaining = $length;
+        $sent = 0;
+        $failed = false;
         try {
+            // Kleine Pakete verhindern, dass der Symcon Server Socket mit mehreren MB
+            // in einem kurzen Burst geflutet und anschließend zu früh getrennt wird.
             while ($remaining > 0 && !feof($handle)) {
-                $chunk = fread($handle, min(65536, $remaining));
+                $chunk = fread($handle, min(16384, $remaining));
                 if ($chunk === false || $chunk === '') {
+                    $failed = true;
                     break;
                 }
                 if (!$this->SendSocketRaw($clientIP, $clientPort, $chunk)) {
+                    $failed = true;
                     break;
                 }
-                $remaining -= strlen($chunk);
+                $chunkLen = strlen($chunk);
+                $sent += $chunkLen;
+                $remaining -= $chunkLen;
+
+                // Kurzes Yield alle 256 KiB. Das hält den TCP-Ausgang kontrolliert,
+                // ohne die Wiedergabe merklich zu verzögern.
+                if (($sent % 262144) < 16384) {
+                    IPS_Sleep(1);
+                }
             }
         } finally {
             fclose($handle);
-            $this->CloseSocketClient($clientIP, $clientPort);
         }
+
+        $complete = !$failed && $remaining === 0;
+        $this->WriteAttributeInteger('BytesSent', $sent);
+        $this->WriteAttributeInteger('TransferComplete', $complete ? 1 : 0);
+        $this->WriteAttributeString(
+            'LastTransfer',
+            sprintf('%s | %s | %d/%d Bytes', date('d.m.Y H:i:s'), $complete ? 'komplett' : 'abgebrochen', $sent, $length)
+        );
+        $this->SendDebug('HTTP', sprintf('Transfer %s: %d/%d Bytes an %s:%d', $complete ? 'komplett' : 'abgebrochen', $sent, $length, $clientIP, $clientPort), 0);
+
+        // Verbindung nicht aktiv hart trennen. Der Samsung bzw. Server Socket darf
+        // die HTTP/1.1-Verbindung nach Content-Length selbst sauber schließen/reusen.
     }
 
     private function RegisterRequest(string $clientIP, int $clientPort, string $method, string $target, array $headers): void
@@ -289,12 +324,12 @@ class SamsungAlarmvideoMediaServer extends IPSModule
         $raw = 'HTTP/1.1 ' . $status . ' ' . $reason . "\r\n" .
             'Content-Type: text/plain; charset=utf-8' . "\r\n" .
             'Content-Length: ' . strlen($body) . "\r\n" .
-            'Connection: close' . "\r\n\r\n";
+            'Connection: keep-alive' . "\r\n" .
+            'Keep-Alive: timeout=10, max=100' . "\r\n\r\n";
         if ($method !== 'HEAD') {
             $raw .= $body;
         }
         $this->SendSocketRaw($clientIP, $clientPort, $raw);
-        $this->CloseSocketClient($clientIP, $clientPort);
     }
 
     private function SendHttpError(string $clientIP, int $clientPort, int $status, string $reason): void
@@ -306,13 +341,24 @@ class SamsungAlarmvideoMediaServer extends IPSModule
     {
         $raw = "HTTP/1.1 416 Range Not Satisfiable\r\n" .
             'Content-Range: bytes */' . $size . "\r\n" .
-            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+            "Content-Length: 0\r\nConnection: keep-alive\r\nKeep-Alive: timeout=10, max=100\r\n\r\n";
         $this->SendSocketRaw($clientIP, $clientPort, $raw);
-        $this->CloseSocketClient($clientIP, $clientPort);
     }
 
     private function SendSocketRaw(string $clientIP, int $clientPort, string $raw): bool
     {
+        // Direkter Server-Socket-Versand ist für große Binärdaten zuverlässiger als
+        // der JSON-Datenfluss. Er vermeidet UTF-8-Verpackung des Videostreams.
+        try {
+            $parentID = (int) (IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+            if ($parentID > 0 && function_exists('SSCK_SendPacket')) {
+                return (bool) SSCK_SendPacket($parentID, $raw, $clientIP, $clientPort);
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('HTTP', 'SSCK_SendPacket: ' . $e->getMessage(), 0);
+        }
+
+        // Fallback auf den dokumentierten erweiterten Socket-Datenfluss.
         $payload = [
             'DataID' => self::SOCKET_TX_GUID,
             'Buffer' => $this->EncodeSocketBuffer($raw),
