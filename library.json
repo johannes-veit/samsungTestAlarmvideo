@@ -1,0 +1,12 @@
+{
+  "id": "{6DC070DF-7EBE-42F5-B86A-94C14ED15E2D}",
+  "author": "OpenAI",
+  "name": "Samsung Alarmvideo Test",
+  "url": "",
+  "compatibility": {
+    "version": "9.0"
+  },
+  "version": "0.1.0",
+  "build": 1,
+  "date": 1786879320
+}

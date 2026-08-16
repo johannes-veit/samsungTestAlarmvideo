@@ -1,0 +1,54 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "caption": "Eigenständiger Test für Samsung-TV + ALARM.mp4. Die bestehende Alarmanlage wird nicht verändert."
+    },
+    {
+      "type": "SelectInstance",
+      "name": "SamsungInstanceID",
+      "caption": "SamsungTizen Instanz"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "TVIP",
+      "caption": "IP-Adresse Samsung TV"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "SymconIP",
+      "caption": "IP-Adresse SymBox"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "WebPort",
+      "caption": "Symcon WebServer Port",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "StartDelayMs",
+      "caption": "Video-Startverzögerung nach TV-Start",
+      "suffix": "ms",
+      "minimum": 0,
+      "maximum": 30000
+    }
+  ],
+  "actions": [
+    {
+      "type": "Label",
+      "caption": "Testablauf: TV einschalten → eingestellte Verzögerung → Videoquelle setzen → Loop anfordern → Wiedergabe starten."
+    },
+    {
+      "type": "Button",
+      "caption": "TV + Alarmvideo testen",
+      "onClick": "echo SAVT_TestVideo($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "Video stoppen",
+      "onClick": "echo SAVT_StopVideo($id);"
+    }
+  ]
+}

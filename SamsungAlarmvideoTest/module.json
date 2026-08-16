@@ -1,0 +1,14 @@
+{
+  "id": "{08AF3A16-C63E-4405-B203-29262047C871}",
+  "name": "Samsung Alarmvideo Test",
+  "type": 3,
+  "vendor": "",
+  "aliases": [
+    "Samsung Alarmvideo Test"
+  ],
+  "url": "",
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "SAVT"
+}
