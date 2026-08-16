@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "v0.1.4: Video wird jetzt über einen eigenen DLNA-tauglichen HTTP-Endpunkt mit HEAD/GET, Byte-Range und DLNA-Headern ausgeliefert. Kein /user-Pfad mehr. WakeUp bleibt unverändert über SamsungTizen_WakeUp()."
+      "caption": "v0.1.5: Der Samsung bekommt jetzt echte Medien-URLs mit Dateiendung (.mp4 / .mpeg) statt einer ?format=-URL. MP4 und MPEG-Fallback wurden passend zu den beim funktionierenden Windows-DLNA-Test gesehenen Profilen vorbereitet. WakeUp bleibt unverändert."
     },
     {
       "type": "SelectInstance",
@@ -13,7 +13,9 @@
       "type": "SelectVariable",
       "name": "TVStatusVariableID",
       "caption": "Samsung TV Status (Boolean)",
-      "validVariableTypes": [0]
+      "validVariableTypes": [
+        0
+      ]
     },
     {
       "type": "ValidationTextBox",
@@ -42,7 +44,7 @@
     },
     {
       "type": "Label",
-      "caption": "Der Modulstatus und die Variablen 'Letzter Videoabruf' / 'Videoabrufe' zeigen, ob der Samsung die Videoquelle tatsächlich vom Symcon-Modul anfordert."
+      "caption": "Der Modulstatus und 'Letzter Videoabruf' zeigen, ob Samsung die neue .mp4/.mpeg-URL tatsächlich abruft."
     }
   ],
   "actions": [

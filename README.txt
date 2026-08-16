@@ -1,14 +1,11 @@
-Samsung Alarmvideo Test v0.1.4
+Samsung Alarmvideo Test v0.1.5
 
-Testmodul fuer Samsung Q90/Q95T + IP-Symcon 9.
+- Bestehende Instanz weiterverwenden.
+- WakeUp unverändert.
+- DLNA-URLs nun mit echter Endung .mp4 bzw. .mpeg.
+- Keine Query-Format-URL mehr.
+- MP4: 1280x720 H.264 High, AAC 48 kHz Stereo.
+- MPEG-Fallback: 1280x720 H.264 Main, AAC 48 kHz Stereo.
+- DLNA-Profile an die beim erfolgreichen Windows-'Wiedergabe auf Gerät'-Test beobachteten Profile angenähert.
 
-- bestehende Instanz weiterverwenden
-- WakeUp ueber SamsungTizen_WakeUp()
-- einstellbare Startverzoegerung (Standard 4000 ms)
-- eigener DLNA-HTTP-Endpunkt im Modul
-- HEAD/GET + Byte-Range + DLNA-Header
-- MP4 direkt, MPEG-TS als Fallback
-- Videoabrufe werden im Objektbaum protokolliert
-- keine PowerShell und kein externer Webserver erforderlich
-
-Die bestehende LCN Alarmanlage wird durch dieses Testmodul nicht veraendert.
+Test: TV eingeschaltet lassen und '2. Nur Alarmvideo starten (TV EIN)' drücken.

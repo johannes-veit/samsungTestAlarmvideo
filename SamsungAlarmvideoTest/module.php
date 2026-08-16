@@ -8,7 +8,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     private const AVT_SERVICE = 'urn:schemas-upnp-org:service:AVTransport:1';
     private const MP4_FILENAME = 'ALARM.mp4';
     private const TS_FILENAME = 'ALARM_DLNA.ts';
-    private const HOOK_ADDRESS = 'samsung-alarmvideo-dlna';
+    private const HOOK_MP4 = 'samsung-alarmvideo-dlna.mp4';
+    private const HOOK_MPEG = 'samsung-alarmvideo-dlna.mpeg';
 
     public function Create(): void
     {
@@ -21,7 +22,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->RegisterPropertyInteger('WebPort', 3777);
         $this->RegisterPropertyInteger('StartDelayMs', 4000);
 
-        $this->RegisterHook(self::HOOK_ADDRESS);
+        $this->RegisterHook(self::HOOK_MP4);
+        $this->RegisterHook(self::HOOK_MPEG);
 
         $this->RegisterVariableString('Status', 'Status', '', 10);
         // Bestehende Variablen aus 0.1.2 bewusst erhalten, damit das Update
@@ -53,18 +55,13 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         }
 
         $prepared = $this->PrepareStaticVideo();
-        $this->SetValue('Status', $prepared['ok'] ? 'Bereit – DLNA-HTTP-Endpunkt aktiv' : $prepared['message']);
+        $this->SetValue('Status', $prepared['ok'] ? 'Bereit – DLNA-Datei-URLs .mp4/.mpeg aktiv' : $prepared['message']);
     }
 
     protected function ProcessHookData(): void
     {
-        $format = strtolower((string) ($_GET['format'] ?? 'mp4'));
-        if (!in_array($format, ['mp4', 'ts'], true)) {
-            http_response_code(404);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo 'Not found';
-            return;
-        }
+        $requestUri = strtolower((string) ($_SERVER['REQUEST_URI'] ?? ''));
+        $format = str_contains($requestUri, self::HOOK_MPEG) ? 'ts' : 'mp4';
 
         $path = $this->GetVideoPath($format);
         if (!is_file($path)) {
@@ -158,8 +155,8 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $length = $end - $start + 1;
         $mime = $format === 'ts' ? 'video/mpeg' : 'video/mp4';
         $features = $format === 'ts'
-            ? 'DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
-            : 'DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
+            ? 'DLNA.ORG_PN=AVC_TS_MP_HD_AAC_MULT5_ISO;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
+            : 'DLNA.ORG_PN=AVC_MP4_HP_HD_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
 
         http_response_code($partial ? 206 : 200);
         header('Content-Type: ' . $mime);
@@ -395,7 +392,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         return [
             'ok' => true,
-            'message' => 'DLNA-Videoquelle bereit – MP4 + MPEG-TS im Modul'
+            'message' => 'DLNA-Videoquelle bereit – .mp4 + .mpeg URLs aktiv'
         ];
     }
 
@@ -409,20 +406,19 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $host = trim($this->ReadPropertyString('SymconIP'));
         $port = $this->ReadPropertyInteger('WebPort');
         return sprintf(
-            'http://%s:%d/hook/%s?format=%s',
+            'http://%s:%d/hook/%s',
             $host,
             $port,
-            self::HOOK_ADDRESS,
-            $format === 'ts' ? 'ts' : 'mp4'
+            $format === 'ts' ? self::HOOK_MPEG : self::HOOK_MP4
         );
     }
 
     private function GetDLNAProtocol(string $format): string
     {
         if ($format === 'ts') {
-            return 'http-get:*:video/mpeg:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
+            return 'http-get:*:video/mpeg:DLNA.ORG_PN=AVC_TS_MP_HD_AAC_MULT5_ISO;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
         }
-        return 'http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
+        return 'http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_HP_HD_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
     }
 
     private function ValidateConfiguration(): string
@@ -503,16 +499,16 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
     {
         $protocol = $this->GetDLNAProtocol($format);
         $mime = $format === 'ts' ? 'video/mpeg' : 'video/mp4';
-        $resolution = $format === 'ts' ? '960x540' : '960x540';
+        $resolution = '1280x720';
 
         return '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ' .
             'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ' .
             'xmlns:sec="http://www.sec.co.kr/" ' .
             'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">' .
-            '<item id="0" parentID="0" restricted="0">' .
+            '<item id="1000" parentID="0" restricted="1">' .
             '<dc:title>ALARM</dc:title>' .
             '<res size="' . max(0, $size) . '" duration="0:01:00.000" resolution="' . $resolution . '" ' .
-            'protocolInfo="' . $this->XmlEscape($protocol) . '" sec:URIType="public">' .
+            'protocolInfo="' . $this->XmlEscape($protocol) . '" sampleFrequency="48000" nrAudioChannels="2">' .
             $this->XmlEscape($url) . '</res>' .
             '<upnp:class>object.item.videoItem</upnp:class>' .
             '</item></DIDL-Lite>';
