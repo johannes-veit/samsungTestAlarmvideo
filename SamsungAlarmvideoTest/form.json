@@ -2,7 +2,7 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "v0.1.6: DLNA/AVTransport wird nicht mehr verwendet. Das Modul startet den Samsung-Internetbrowser direkt über den bereits vorhandenen SamsungTizen-WebSocket und öffnet dort einen Vollbild-Alarmplayer. WakeUp bleibt unverändert."
+      "caption": "v0.2.0: direktes Update von v0.1.6. WakeUp bleibt unverändert. Das Video wird jetzt über einen eigenen kleinen DLNA/HTTP-Medienserver auf der SymBox ausgeliefert. Die technische Hilfsinstanz und der Server Socket werden automatisch erstellt und verborgen."
     },
     {
       "type": "SelectInstance",
@@ -13,9 +13,7 @@
       "type": "SelectVariable",
       "name": "TVStatusVariableID",
       "caption": "Samsung TV Status (Boolean)",
-      "validVariableTypes": [
-        0
-      ]
+      "validVariableTypes": [0]
     },
     {
       "type": "ValidationTextBox",
@@ -29,9 +27,9 @@
     },
     {
       "type": "NumberSpinner",
-      "name": "WebPort",
-      "caption": "Symcon WebServer Port",
-      "minimum": 1,
+      "name": "MediaServerPort",
+      "caption": "DLNA-Medienserver Port",
+      "minimum": 1025,
       "maximum": 65535
     },
     {
@@ -43,14 +41,19 @@
       "maximum": 30000
     },
     {
+      "type": "CheckBox",
+      "name": "LoopVideo",
+      "caption": "Alarmvideo in Endlosschleife"
+    },
+    {
       "type": "Label",
-      "caption": "Der Browser-Player startet ALARM.mp4 automatisch mit Ton und Loop. Falls der erste Browserstart nicht greift, erfolgt genau ein automatischer Retry mit der 2020er Internet-App-ID."
+      "caption": "Standard-Port 8090. Es ist keine PowerShell, kein Tizen Studio und kein weiteres GitHub-Modul nötig."
     }
   ],
   "actions": [
     {
       "type": "Button",
-      "caption": "Videoquelle/Player prüfen",
+      "caption": "DLNA-Medienserver prüfen/einrichten",
       "onClick": "echo SAVT_PrepareVideo($id);"
     },
     {
@@ -70,7 +73,7 @@
     },
     {
       "type": "Button",
-      "caption": "Browser / Video beenden",
+      "caption": "Alarmvideo stoppen",
       "onClick": "echo SAVT_StopVideo($id);"
     }
   ]

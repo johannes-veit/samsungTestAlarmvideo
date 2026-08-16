@@ -1,0 +1,9 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "caption": "Interne Hilfsinstanz des Moduls Samsung Alarmvideo Test. Wird automatisch erzeugt und verborgen. Keine manuelle Konfiguration erforderlich."
+    }
+  ],
+  "actions": []
+}
