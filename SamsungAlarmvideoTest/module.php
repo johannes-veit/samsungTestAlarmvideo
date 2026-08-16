@@ -53,6 +53,7 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->RegisterAttributeInteger('VideoActive', 0);
         $this->RegisterAttributeString('LastMediaMode', '');
         $this->RegisterAttributeInteger('LastHelperRequestCount', 0);
+        $this->RegisterAttributeString('LastMediaServerError', '');
 
         // Bestehende Timer-Namen erhalten.
         $this->RegisterTimer('WakeRetry', 0, 'SAVT_TimerWakeRetry($_IPS[\'TARGET\']);');
@@ -432,22 +433,17 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
     private function EnsureMediaServer(): array
     {
+        $this->WriteAttributeString('LastMediaServerError', '');
         $port = max(1025, min(65535, $this->ReadPropertyInteger('MediaServerPort')));
 
         if (!is_file($this->GetSharedMediaPath('mpeg')) || !is_file($this->GetSharedMediaPath('mp4'))) {
             return ['ok' => false, 'message' => 'Alarmvideo-Dateien fehlen in der Bibliothek'];
         }
 
-        $helperID = $this->FindOrCreateOwnedInstance(
-            'MediaHelperID',
-            self::MEDIA_HELPER_MODULE_GUID,
-            'Samsung Alarmvideo MediaServer Helper',
-            'SAVT_HELPER_OWNER:' . $this->InstanceID
-        );
-        if ($helperID <= 0) {
-            return ['ok' => false, 'message' => 'Interner MediaServer-Helper konnte nicht erstellt werden'];
-        }
-
+        // IP-Symcon 9 / IPSModuleStrict: Bei programmgesteuert erzeugten Instanzen
+        // muss die physikalisch uebergeordnete I/O-Instanz zuerst existieren.
+        // Deshalb immer zuerst den Server Socket anlegen und aktivieren und erst
+        // danach den internen MediaServer-Handler erzeugen.
         $serverID = $this->FindOrCreateOwnedInstance(
             'MediaServerID',
             self::SERVER_SOCKET_MODULE_GUID,
@@ -460,6 +456,17 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         if (!$this->ConfigureServerSocket($serverID, $port)) {
             return ['ok' => false, 'message' => 'Server Socket auf Port ' . $port . ' konnte nicht geöffnet werden'];
+        }
+
+        $helperID = $this->FindOrCreateOwnedInstance(
+            'MediaHelperID',
+            self::MEDIA_HELPER_MODULE_GUID,
+            'Samsung Alarmvideo MediaServer Helper',
+            'SAVT_HELPER_OWNER:' . $this->InstanceID
+        );
+        if ($helperID <= 0) {
+            $detail = trim($this->ReadAttributeString('LastMediaServerError'));
+            return ['ok' => false, 'message' => 'Interner MediaServer-Helper konnte nicht erstellt werden' . ($detail !== '' ? ': ' . $detail : '')];
         }
 
         try {
@@ -503,14 +510,18 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         try {
             // Vor dem Erzeugen sicherstellen, dass Symcon das Modul wirklich geladen hat.
             // So wird bei einer fehlerhaften Bibliotheksstruktur niemals mit Objekt-ID 0 weitergearbeitet.
-            if (!in_array($moduleGUID, IPS_GetModuleList(), true)) {
-                $this->SendDebug('MediaServer', 'Modul nicht geladen: ' . $moduleGUID . ' (' . $name . ')', 0);
+            if (!IPS_ModuleExists($moduleGUID)) {
+                $error = 'Modul nicht geladen: ' . $moduleGUID . ' (' . $name . ')';
+                $this->WriteAttributeString('LastMediaServerError', $error);
+                $this->SendDebug('MediaServer', $error, 0);
                 return 0;
             }
 
             $id = IPS_CreateInstance($moduleGUID);
             if ($id <= 0 || !IPS_InstanceExists($id)) {
-                $this->SendDebug('MediaServer', 'Instanz konnte nicht erzeugt werden: ' . $name, 0);
+                $error = 'Instanz konnte nicht erzeugt werden: ' . $name;
+                $this->WriteAttributeString('LastMediaServerError', $error);
+                $this->SendDebug('MediaServer', $error, 0);
                 return 0;
             }
 
@@ -524,7 +535,9 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             $this->WriteAttributeInteger($attributeName, $id);
             return $id;
         } catch (Throwable $e) {
-            $this->SendDebug('MediaServer', 'Instanz ' . $name . ' konnte nicht erstellt werden: ' . $e->getMessage(), 0);
+            $error = 'Instanz ' . $name . ' konnte nicht erstellt werden: ' . $e->getMessage();
+            $this->WriteAttributeString('LastMediaServerError', $error);
+            $this->SendDebug('MediaServer', $error, 0);
             return 0;
         }
     }

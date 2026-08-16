@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-class SamsungAlarmvideoMediaServer extends IPSModuleStrict
+class SamsungAlarmvideoMediaServer extends IPSModule
 {
     private const SOCKET_TX_GUID = '{C8792760-65CF-4C53-B5C7-A30FCC84FEFE}';
     private const MPEG_FEATURES = 'DLNA.ORG_PN=AVC_TS_MP_HD_AAC_MULT5_ISO;DLNA.ORG_OP=10;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01700000000000000000000000000000';
@@ -22,14 +22,6 @@ class SamsungAlarmvideoMediaServer extends IPSModuleStrict
     {
         parent::ApplyChanges();
         $this->WriteAttributeString('ClientBuffers', '{}');
-    }
-
-    public function GetCompatibleParents(): string
-    {
-        return json_encode([
-            'type' => 'require',
-            'moduleIDs' => ['{8062CF2B-600E-41D6-AD4B-1BA66C32D6ED}']
-        ], JSON_UNESCAPED_SLASHES) ?: '{}';
     }
 
     public function ReceiveData(string $JSONString): string

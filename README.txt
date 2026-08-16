@@ -27,7 +27,10 @@ Test:
 v0.2.2: Bibliotheksstruktur korrigiert. Keine libs/media-Unterstruktur mehr; die Mediendateien liegen direkt im internen MediaServer-Modulordner, damit IP-Symcon keinen Ordner 'media' als Modul interpretiert.
 
 
-v0.2.3 Update-Sicherheit:
+v0.2.4 Update-Sicherheit:
 - Der historische Root-Ordner 'media' aus v0.2.0 wird absichtlich als gueltiges Kompatibilitaetsmodul mitgeliefert.
 - Damit funktioniert auch ein reines Ueberschreiben eines bestehenden GitHub-Ordners, ohne dass der alte media-Ordner vorher geloescht werden muss.
 - Technische Helper-/ServerSocket-Instanzen werden nicht mehr per IPS_SetParent umgehaengt; dadurch entfallen Root-Warnungen.
+
+
+v0.2.4: Korrektur der programmgesteuerten MediaServer-Erzeugung fuer IP-Symcon 9. Der Server Socket wird jetzt zwingend zuerst erstellt/aktiviert; der technische MediaServer-Handler verwendet bewusst IPSModule statt IPSModuleStrict und wird danach explizit verbunden. Modulpruefung erfolgt ueber IPS_ModuleExists().
