@@ -1,4 +1,4 @@
-Samsung Alarmvideo Test 0.1.0
+Samsung Alarmvideo Test 0.1.1
 ==============================
 
 Zweck
@@ -27,3 +27,9 @@ Technik
 -------
 Das Modul stellt ALARM.mp4 selbst über einen Symcon-WebHook bereit und steuert
 den Samsung direkt über UPnP AVTransport. Windows/PowerShell ist nicht nötig.
+
+Aenderungen 0.1.1
+-----------------
+- TV-WakeUp wie in der bewaehrten Alarmanlagen-Logik: sofort, Statuspruefung nach 5 s, maximal ein zweiter WakeUp.
+- Video startet nach einstellbarer Verzoegerung; AVTransport wird bei bereits eingeschaltetem TV begrenzt erneut versucht.
+- Keine Endlosschleifen, keine PowerShell.

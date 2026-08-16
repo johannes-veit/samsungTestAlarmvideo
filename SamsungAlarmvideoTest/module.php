@@ -21,52 +21,104 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
         $this->RegisterVariableString('LastRequest', 'Letzter Videoabruf', '', 20);
         $this->RegisterVariableInteger('RequestCount', 'Videoabrufe', '', 30);
 
+        $this->RegisterAttributeInteger('WakeAttempts', 0);
+        $this->RegisterAttributeInteger('VideoAttempts', 0);
+
+        $this->RegisterTimer('WakeRetry', 0, 'SAVT_TimerWakeRetry($_IPS[\'TARGET\']);');
         $this->RegisterTimer('VideoStart', 0, 'SAVT_TimerStart($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('VideoRetry', 0, 'SAVT_TimerVideoRetry($_IPS[\'TARGET\']);');
         $this->RegisterHook(self::HOOK);
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->SetTimerInterval('WakeRetry', 0);
         $this->SetTimerInterval('VideoStart', 0);
+        $this->SetTimerInterval('VideoRetry', 0);
+        $this->WriteAttributeInteger('WakeAttempts', 0);
+        $this->WriteAttributeInteger('VideoAttempts', 0);
         $this->SetValue('Status', 'Bereit');
     }
 
     public function TestVideo(): string
     {
+        $this->SetTimerInterval('WakeRetry', 0);
         $this->SetTimerInterval('VideoStart', 0);
+        $this->SetTimerInterval('VideoRetry', 0);
+        $this->WriteAttributeInteger('WakeAttempts', 0);
+        $this->WriteAttributeInteger('VideoAttempts', 0);
 
         $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
         $delay = max(0, $this->ReadPropertyInteger('StartDelayMs'));
 
-        if ($instanceID <= 0) {
-            $this->SetValue('Status', 'Fehler: SamsungTizen Instanz nicht gewählt');
-            return 'SamsungTizen Instanz nicht gewählt.';
+        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
+            $this->SetValue('Status', 'Fehler: SamsungTizen Instanz ungültig');
+            return 'SamsungTizen Instanz ungültig.';
         }
 
-        try {
-            if (!function_exists('SamsungTizen_WakeUp')) {
-                throw new RuntimeException('SamsungTizen_WakeUp() ist nicht verfügbar.');
+        $tvState = $this->TVIsOn();
+        if ($tvState === true) {
+            $this->SetValue('Status', sprintf('TV bereits EIN – Video in %.1f s', $delay / 1000));
+            if ($delay === 0) {
+                return $this->StartVideoNow();
             }
-
-            SamsungTizen_WakeUp($instanceID);
-            $this->SetValue('Status', sprintf('TV-Start gesendet – Video in %.1f s', $delay / 1000));
-        } catch (Throwable $e) {
-            $this->SetValue('Status', 'TV-Start fehlgeschlagen: ' . $e->getMessage());
-            return 'TV-Start fehlgeschlagen: ' . $e->getMessage();
+            $this->SetTimerInterval('VideoStart', $delay);
+            return sprintf('TV ist bereits EIN. Alarmvideo startet nach %.1f Sekunden.', $delay / 1000);
         }
+
+        if (!$this->SendWakeUp(1)) {
+            return (string) GetValue($this->GetIDForIdent('Status'));
+        }
+
+        // Bewährte Logik aus der Alarmanlage: nach 5 s genau einmal prüfen
+        // und nur bei weiterhin AUS einen zweiten WakeUp senden.
+        $this->SetTimerInterval('WakeRetry', 5000);
 
         if ($delay === 0) {
-            return $this->StartVideoNow();
+            $this->SetTimerInterval('VideoStart', 250);
+        } else {
+            $this->SetTimerInterval('VideoStart', $delay);
         }
 
-        $this->SetTimerInterval('VideoStart', $delay);
-        return sprintf('TV-Start gesendet. Alarmvideo startet nach %.1f Sekunden.', $delay / 1000);
+        $message = sprintf('TV-Start gesendet – Video in %.1f s', $delay / 1000);
+        $this->SetValue('Status', $message);
+        return $message;
+    }
+
+    public function TimerWakeRetry(): void
+    {
+        $this->SetTimerInterval('WakeRetry', 0);
+
+        $tvState = $this->TVIsOn();
+        if ($tvState === true) {
+            // Falls der erste Video-Versuch wegen noch nicht bereitem AVTransport
+            // fehlgeschlagen ist, jetzt unmittelbar erneut versuchen.
+            if ($this->ReadAttributeInteger('VideoAttempts') > 0) {
+                $this->SetTimerInterval('VideoRetry', 250);
+            }
+            return;
+        }
+
+        // Maximal ein zweiter WakeUp. Kein Endlos-WOL und kein Toggle-Sturm.
+        if ($this->ReadAttributeInteger('WakeAttempts') < 2 && $this->SendWakeUp(2)) {
+            $this->SetTimerInterval('VideoRetry', 0);
+            $this->WriteAttributeInteger('VideoAttempts', 0);
+            $delay = max(250, $this->ReadPropertyInteger('StartDelayMs'));
+            $this->SetTimerInterval('VideoStart', $delay);
+            $this->SetValue('Status', sprintf('TV noch AUS – 2. WakeUp gesendet, Video in %.1f s', $delay / 1000));
+        }
     }
 
     public function TimerStart(): void
     {
         $this->SetTimerInterval('VideoStart', 0);
+        $this->StartVideoNow();
+    }
+
+    public function TimerVideoRetry(): void
+    {
+        $this->SetTimerInterval('VideoRetry', 0);
         $this->StartVideoNow();
     }
 
@@ -80,8 +132,11 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
             return 'ALARM.mp4 fehlt im Modul.';
         }
 
+        $attempt = $this->ReadAttributeInteger('VideoAttempts') + 1;
+        $this->WriteAttributeInteger('VideoAttempts', $attempt);
+
         $url = $this->GetVideoURL();
-        $this->SetValue('Status', 'Setze Videoquelle: ' . $url);
+        $this->SetValue('Status', sprintf('Video-Start Versuch %d – %s', $attempt, $url));
 
         $metadata = $this->BuildMetadata($url);
         $result = $this->SendAVTransport('SetAVTransportURI',
@@ -92,8 +147,19 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         if (!$result['ok']) {
             $message = 'SetAVTransportURI fehlgeschlagen: ' . $result['message'];
-            $this->SetValue('Status', $message);
-            $this->SendDebug('SetAVTransportURI', $result['body'], 0);
+            $this->SendDebug('SetAVTransportURI', $message . ' | ' . $result['body'], 0);
+
+            // Wenn der TV laut seiner vorhandenen Statusvariable noch AUS ist,
+            // wartet die WakeRetry-Logik. Sonst AVTransport begrenzt weiter prüfen.
+            $tvState = $this->TVIsOn();
+            if ($tvState !== false && $attempt < 10) {
+                $this->SetTimerInterval('VideoRetry', 1000);
+                $this->SetValue('Status', $message . sprintf(' – neuer Versuch %d/10', $attempt + 1));
+            } elseif ($tvState === false) {
+                $this->SetValue('Status', 'TV noch AUS – warte auf Wake-Retry');
+            } else {
+                $this->SetValue('Status', $message . ' – Abbruch nach 10 Versuchen');
+            }
             return $message;
         }
 
@@ -111,20 +177,87 @@ class SamsungAlarmvideoTest extends IPSModuleStrict
 
         if (!$play['ok']) {
             $message = 'Play fehlgeschlagen: ' . $play['message'];
-            $this->SetValue('Status', $message);
-            $this->SendDebug('Play', $play['body'], 0);
+            $this->SendDebug('Play', $message . ' | ' . $play['body'], 0);
+            if ($attempt < 10) {
+                $this->SetTimerInterval('VideoRetry', 1000);
+                $this->SetValue('Status', $message . sprintf(' – neuer Versuch %d/10', $attempt + 1));
+            } else {
+                $this->SetValue('Status', $message . ' – Abbruch nach 10 Versuchen');
+            }
             return $message;
         }
 
+        $this->SetTimerInterval('VideoRetry', 0);
         $loopText = $loop['ok'] ? 'Loop angefordert' : 'Loop nicht bestätigt';
         $message = 'Wiedergabe gestartet – ' . $loopText;
         $this->SetValue('Status', $message);
         return $message;
     }
 
+    private function SendWakeUp(int $attempt): bool
+    {
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
+            $this->SetValue('Status', 'Fehler: SamsungTizen Instanz ungültig');
+            return false;
+        }
+
+        if (!function_exists('SamsungTizen_WakeUp')) {
+            $this->SetValue('Status', 'Fehler: SamsungTizen_WakeUp() nicht verfügbar');
+            return false;
+        }
+
+        try {
+            SamsungTizen_WakeUp($instanceID);
+            $this->WriteAttributeInteger('WakeAttempts', $attempt);
+            $this->SendDebug('WakeUp', 'WakeUp #' . $attempt . ' an Instanz ' . $instanceID . ' gesendet', 0);
+            return true;
+        } catch (Throwable $e) {
+            $message = 'TV-Start fehlgeschlagen: ' . $e->getMessage();
+            $this->SetValue('Status', $message);
+            $this->SendDebug('WakeUp', $message, 0);
+            return false;
+        }
+    }
+
+    private function TVIsOn(): ?bool
+    {
+        $instanceID = $this->ReadPropertyInteger('SamsungInstanceID');
+        if ($instanceID <= 0 || !IPS_InstanceExists($instanceID)) {
+            return null;
+        }
+
+        try {
+            foreach (IPS_GetChildrenIDs($instanceID) as $childID) {
+                $object = IPS_GetObject($childID);
+                if ((int) ($object['ObjectType'] ?? -1) !== 2) {
+                    continue;
+                }
+                $variable = IPS_GetVariable($childID);
+                if ((int) ($variable['VariableType'] ?? -1) !== 0) {
+                    continue;
+                }
+
+                $name = strtolower(trim((string) ($object['ObjectName'] ?? '')));
+                $ident = strtolower(trim((string) ($object['ObjectIdent'] ?? '')));
+                if ($name === 'status' || $ident === 'status') {
+                    return GetValueBoolean($childID);
+                }
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('TVStatus', 'Statusvariable konnte nicht gelesen werden: ' . $e->getMessage(), 0);
+        }
+
+        return null;
+    }
+
     public function StopVideo(): string
     {
+        $this->SetTimerInterval('WakeRetry', 0);
         $this->SetTimerInterval('VideoStart', 0);
+        $this->SetTimerInterval('VideoRetry', 0);
+        $this->WriteAttributeInteger('WakeAttempts', 0);
+        $this->WriteAttributeInteger('VideoAttempts', 0);
 
         $stop = $this->SendAVTransport('Stop', '<InstanceID>0</InstanceID>');
         if (!$stop['ok']) {
